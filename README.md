@@ -54,7 +54,8 @@ Merci de lire les fichiers :
 
 ## Auteurs
 
-* **Zlatan Ibrahimovic**
+* O.C.barbarian alias Zlatan Ibrahimovic**
+
 
 ## License
 
