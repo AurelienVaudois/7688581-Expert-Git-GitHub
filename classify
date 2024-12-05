@@ -54,3 +54,58 @@ df_categories = pd.DataFrame({
 
 df_result = classify_verbatims(df_verbatims, df_categories)
 print(df_result)
+
+-------++++++++++++++++-------------
+
+import pandas as pd
+from sklearn.metrics import classification_report, multilabel_confusion_matrix
+
+def evaluate_performance(df, category_mapping):
+    """
+    Évalue les performances du modèle en utilisant un mapping entre codes de catégories et noms de colonnes.
+
+    Args:
+        df (pd.DataFrame): DataFrame contenant les annotations et prédictions.
+        category_mapping (dict): Dictionnaire de correspondance {code: nom_de_colonne}.
+
+    Returns:
+        str: Rapport de classification pour chaque catégorie.
+    """
+    # Extraire les noms des colonnes de prédictions à partir du mapping
+    category_columns = list(category_mapping.values())
+
+    # Prétraitement des annotations : Vérifier si chaque code est présent dans les annotations
+    true_multilabel = pd.DataFrame({
+        category_mapping[code]: df['annotations'].apply(lambda x: category_mapping[code] in x)
+        for code in category_mapping
+    })
+
+    # Convertir les prédictions "Oui"/"Non" en format binaire
+    pred_multilabel = df[category_columns].applymap(lambda x: 1 if x == "Oui" else 0)
+
+    # Calculer les métriques de classification
+    report = classification_report(true_multilabel, pred_multilabel, target_names=category_columns)
+    confusion_matrices = multilabel_confusion_matrix(true_multilabel, pred_multilabel)
+
+    return report, confusion_matrices
+
+# Exemple d'utilisation
+df_example = pd.DataFrame({
+    "verbatim": ["Text1", "Text2", "Text3"],
+    "annotations": [{"c0201", "c0301"}, {"c0202"}, {"c0301"}],  # True labels
+    "Positive Experience": ["Oui", "Non", "Oui"],  # Predictions
+    "Negative Experience": ["Non", "Oui", "Non"]   # Predictions
+})
+
+# Dictionnaire de correspondance entre codes et noms de colonnes
+category_mapping = {
+    "c0201": "Positive Experience",
+    "c0301": "Negative Experience",
+    # Ajoutez d'autres correspondances ici
+}
+
+# Évaluation des performances
+classification_rep, confusion_matrices = evaluate_performance(df_example, category_mapping)
+
+print(classification_rep)
+print(confusion_matrices)
