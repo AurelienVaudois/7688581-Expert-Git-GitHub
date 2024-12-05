@@ -1,0 +1,56 @@
+import pandas as pd
+import outlines
+
+# Charger le modèle
+model = outlines.models.transformers("microsoft/Phi-3-mini-4k-instruct")
+
+def classify_verbatims(df, categories):
+    """
+    Classifie chaque verbatim dans un DataFrame selon des catégories spécifiques.
+
+    Args:
+        df (pd.DataFrame): Le DataFrame contenant les verbatims.
+        categories (pd.DataFrame): Un DataFrame contenant deux colonnes :
+            - "categorie": le nom de la catégorie.
+            - "definition": une courte description de la catégorie.
+
+    Returns:
+        pd.DataFrame: Le DataFrame d'origine avec des colonnes supplémentaires pour chaque catégorie.
+    """
+    # Itérer sur chaque catégorie
+    for _, row in categories.iterrows():
+        category_name = row['categorie']
+        category_definition = row['definition']
+
+        # Créer une nouvelle colonne pour la catégorie
+        col_name = f"belongs_to_{category_name}"
+
+        def classify(verbatim):
+            prompt = f"""
+            You are a text-classification assistant. Determine if the following text fits the category below:
+
+            Text: {verbatim}
+            Category: {category_name}
+            Definition: {category_definition}
+            
+            Answer 'Yes' or 'No'.
+            """
+
+            generator = outlines.generate.choice(model, ["Yes", "No"])
+            response = generator(prompt)
+            return response == "Yes"
+
+        # Appliquer la fonction de classification
+        df[col_name] = df['verbatim'].apply(classify)
+
+    return df
+
+# Exemple d'utilisation
+df_verbatims = pd.DataFrame({"verbatim": ["This product is amazing!", "I had a terrible experience.", "Service was okay."]})
+df_categories = pd.DataFrame({
+    "categorie": ["Positive Experience", "Negative Experience"],
+    "definition": ["The text expresses positive sentiment.", "The text expresses negative sentiment."]
+})
+
+df_result = classify_verbatims(df_verbatims, df_categories)
+print(df_result)
