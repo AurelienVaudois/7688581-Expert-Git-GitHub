@@ -156,3 +156,49 @@ for cat in categories:
 metrics_df = pd.DataFrame(metrics).T
 metrics_df.index.name = "Category"
 import ace_tools as tools; tools.display_dataframe_to_user(name="Performance Metrics for LLM Classification", dataframe=metrics_df)
+
+---------------------------------------------------------
+
+from sklearn.metrics import classification_report
+import pandas as pd
+import ast
+
+# Exemple de données avec problème dans MLC2_CATEG_NIV2
+data = {
+    "FBK_VERBATIM": ["changement permanent de conseiller", "retard du train", "conseiller désagréable"],
+    "MLC2_CATEG_NIV2": ["['c0405']", "['c0401', 'c0402']", "['c0403']"],
+    "Horaires": ["non", "oui", "non"],
+    "Fiabilité": ["non", "oui", "non"],
+    "Relation client": ["non", "non", "oui"]
+}
+df = pd.DataFrame(data)
+
+# Correction : conversion des chaînes en listes
+df['MLC2_CATEG_NIV2'] = df['MLC2_CATEG_NIV2'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
+
+# Dictionnaire de correspondance
+category_mapping = {
+    "Horaires": "c0401",
+    "Fiabilité": "c0402",
+    "Relation client": "c0403",
+}
+
+# Conversion des prédictions en binaire
+categories = list(category_mapping.keys())
+for cat in categories:
+    df[cat] = df[cat].map({"oui": 1, "non": 0})
+
+# Création des colonnes vérité terrain
+for cat, code in category_mapping.items():
+    df[f"true_{cat}"] = df["MLC2_CATEG_NIV2"].apply(lambda x: 1 if code in x else 0)
+
+# Préparation des données pour le rapport
+y_true = df[[f"true_{cat}" for cat in categories]].values  # Vérités terrain
+y_pred = df[categories].values  # Prédictions du modèle
+
+# Génération du rapport de classification
+report = classification_report(y_true, y_pred, target_names=categories, zero_division=0)
+
+# Affichage du rapport
+print(report)
+
