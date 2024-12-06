@@ -109,3 +109,50 @@ classification_rep, confusion_matrices = evaluate_performance(df_example, catego
 
 print(classification_rep)
 print(confusion_matrices)
+
+-----------------------------------------------------------------------
+
+import pandas as pd
+from sklearn.metrics import precision_score, recall_score, accuracy_score
+
+# Exemple de DataFrame
+data = {
+    "FBK_VERBATIM": ["changement permanent de conseiller", "retard du train", "conseiller désagréable"],
+    "MLC2_CATEG_NIV2": [["c0405"], ["c0401", "c0402"], ["c0403"]],
+    "Horaires": ["non", "oui", "non"],
+    "Fiabilité": ["non", "oui", "non"],
+    "Relation client": ["non", "non", "oui"]
+}
+df = pd.DataFrame(data)
+
+# Dictionnaire de correspondance des catégories
+category_mapping = {
+    "Horaires": "c0401",
+    "Fiabilité": "c0402",
+    "Relation client": "c0403",
+    # etc.
+}
+
+# Conversion des prédictions en binaire (0 pour 'non', 1 pour 'oui')
+categories = list(category_mapping.keys())
+for cat in categories:
+    df[cat] = df[cat].map({"oui": 1, "non": 0})
+
+# Création des colonnes binaires pour la vérité terrain
+for cat, code in category_mapping.items():
+    df[f"true_{cat}"] = df["MLC2_CATEG_NIV2"].apply(lambda x: 1 if code in x else 0)
+
+# Calcul des métriques
+metrics = {}
+for cat in categories:
+    true_col = f"true_{cat}"
+    pred_col = cat
+    precision = precision_score(df[true_col], df[pred_col], zero_division=0)
+    recall = recall_score(df[true_col], df[pred_col], zero_division=0)
+    accuracy = accuracy_score(df[true_col], df[pred_col])
+    metrics[cat] = {"precision": precision, "recall": recall, "accuracy": accuracy}
+
+# Affichage des résultats
+metrics_df = pd.DataFrame(metrics).T
+metrics_df.index.name = "Category"
+import ace_tools as tools; tools.display_dataframe_to_user(name="Performance Metrics for LLM Classification", dataframe=metrics_df)
