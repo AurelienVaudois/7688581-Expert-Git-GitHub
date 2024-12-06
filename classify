@@ -202,3 +202,53 @@ report = classification_report(y_true, y_pred, target_names=categories, zero_div
 # Affichage du rapport
 print(report)
 
+-------------------------------------------------------------------------
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics import classification_report
+
+# Exemple de données
+data = {
+    "FBK_VERBATIM": ["exemple 1", "exemple 2", "exemple 3"],
+    "MLC2_CATEG_NIV2": [np.array(['c0401', 'c0501']), np.array(['c0503']), np.array(['c0401', 'c0503'])],
+    "Horaires": ["oui", "non", "oui"],
+    "Fiabilité": ["non", "non", "non"],
+    "Relation client": ["non", "oui", "oui"]
+}
+df = pd.DataFrame(data)
+
+# Dictionnaire des catégories et correspondances
+category_mapping = {
+    "Horaires": "c0401",
+    "Fiabilité": "c0501",
+    "Relation client": "c0503",
+}
+
+# Liste des catégories uniques à partir du dictionnaire
+all_categories = list(category_mapping.values())
+
+# Transformation des vérités terrain (MLC2_CATEG_NIV2) en matrice binaire
+def binary_matrix(array_column, categories):
+    binary_matrix = np.zeros((len(array_column), len(categories)), dtype=int)
+    for i, row in enumerate(array_column):
+        for cat in row:
+            if cat in categories:
+                binary_matrix[i, categories.index(cat)] = 1
+    return binary_matrix
+
+# Matrices binaires pour y_true (vérités terrain) et y_pred (prédictions)
+y_true = binary_matrix(df['MLC2_CATEG_NIV2'], all_categories)
+
+# Conversion des prédictions en binaire
+df['Horaires'] = df['Horaires'].map({"oui": 1, "non": 0})
+df['Fiabilité'] = df['Fiabilité'].map({"oui": 1, "non": 0})
+df['Relation client'] = df['Relation client'].map({"oui": 1, "non": 0})
+
+# Génération de y_pred à partir des colonnes de prédictions
+y_pred = df[list(category_mapping.keys())].values
+
+# Calcul du rapport de classification
+report = classification_report(y_true, y_pred, target_names=all_categories, zero_division=0)
+print(report)
+
