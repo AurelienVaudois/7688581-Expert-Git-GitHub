@@ -303,3 +303,91 @@ def classify_verbatims(df, categories, output_path="resultats.csv"):
     # Sauvegarde finale
     df.to_csv(output_path, index=False)
     return df
+---------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+import os
+import outlines
+
+# Charger le modèle
+model = outlines.models.transformers("microsoft/Phi-3-mini-4k-instruct")
+
+def classify(verbatim, category_name, category_definition):
+    """
+    Classifie un verbatim pour une catégorie donnée.
+    Retourne "oui" ou "non".
+    """
+    prompt = f"""
+Tu es un expert en analyse de texte.
+Tu dois répondre strictement "oui" ou "non" sans autre texte.
+
+Définition de la catégorie {category_name} : {category_definition}
+
+Le verbatim suivant appartient-il à la catégorie {category_name} ?
+"{verbatim}"
+
+Réponds uniquement par "oui" ou "non".
+"""
+    generator = outlines.generate.choice(model, ["oui", "non"])
+    response = generator(prompt)
+    return response.strip()
+
+def classify_verbatims(df, categories, output_path="resultats.csv"):
+    """
+    Classifie chaque verbatim pour chaque catégorie, puis sauvegarde après chaque verbatim.
+    
+    Args:
+        df (pd.DataFrame): doit contenir :
+            - 'FBK_VERBATIMS' : identifiant unique du verbatim
+            - 'verbatim' : le texte du verbatim
+        categories (pd.DataFrame): doit contenir :
+            - 'LIB_CATEG' : nom de la catégorie (ex: 'c0401')
+            - 'LIB_DESC' : définition textuelle de la catégorie
+        output_path (str): chemin pour sauvegarder les résultats partiels et finaux.
+    
+    Returns:
+        pd.DataFrame: Le DataFrame avec une colonne par catégorie (oui/non).
+    """
+
+    # Charger des résultats partiels s'ils existent
+    if os.path.exists(output_path):
+        df_partials = pd.read_csv(output_path)
+        # Fusion sur FBK_VERBATIMS
+        df = df.merge(df_partials, on="FBK_VERBATIMS", how="left", suffixes=("", "_old"))
+        
+        # Combiner les colonnes dupliquées (anciennes et nouvelles)
+        for cat in categories['LIB_CATEG']:
+            if cat in df.columns and f"{cat}_old" in df.columns:
+                df[cat] = df[cat].combine_first(df[f"{cat}_old"])
+                df.drop(columns=[f"{cat}_old"], inplace=True, errors='ignore')
+    else:
+        # Vérifier la présence de l'ID
+        if "FBK_VERBATIMS" not in df.columns:
+            raise ValueError("La colonne 'FBK_VERBATIMS' est requise pour identifier les verbatims.")
+
+    # Créer les colonnes catégories si absentes
+    for cat in categories['LIB_CATEG']:
+        if cat not in df.columns:
+            df[cat] = None
+
+    # Itérer sur chaque verbatim
+    for idx in df.index:
+        # Vérifier si toutes les catégories sont déjà classifiées pour ce verbatim
+        row = df.loc[idx]
+        missing_cats = categories['LIB_CATEG'][row[categories['LIB_CATEG']].isna()]
+
+        # Si pas de catégories manquantes, continuer
+        if missing_cats.empty:
+            continue
+
+        # Classifier les catégories manquantes
+        verbatim_text = row['verbatim']
+        for cat_code in missing_cats:
+            cat_def = categories.loc[categories['LIB_CATEG'] == cat_code, 'LIB_DESC'].iloc[0]
+            result = classify(verbatim_text, cat_code, cat_def)
+            df.at[idx, cat_code] = result
+
+        # Sauvegarder après avoir traité toutes les catégories de ce verbatim
+        df.to_csv(output_path, index=False)
+
+    return df
