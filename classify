@@ -365,23 +365,32 @@ def classify_verbatims(df, categories, output_path="resultats.csv"):
         if "FBK_VERBATIMS" not in df.columns:
             raise ValueError("La colonne 'FBK_VERBATIMS' est requise pour identifier les verbatims.")
 
-    # Créer les colonnes catégories si absentes
+# S'assurer que les colonnes pour chaque catégorie existent
     for cat in categories['LIB_CATEG']:
         if cat not in df.columns:
             df[cat] = None
 
+    # Tableau numpy des catégories
+    cat_array = categories['LIB_CATEG'].values
+
     # Itérer sur chaque verbatim
     for idx in df.index:
-        # Vérifier si toutes les catégories sont déjà classifiées pour ce verbatim
         row = df.loc[idx]
-        missing_cats = categories['LIB_CATEG'][row[categories['LIB_CATEG']].isna()]
+        # Extraire les valeurs correspondant aux catégories
+        # row[cat_array] donne les valeurs des colonnes catégorie pour cette ligne
+        row_values = row[cat_array]
+        # Boolean mask des catégories manquantes
+        missing_mask = row_values.isna().values
+        # Catégories manquantes
+        missing_cats = cat_array[missing_mask]
 
-        # Si pas de catégories manquantes, continuer
-        if missing_cats.empty:
+        if len(missing_cats) == 0:
+            # Toutes les catégories de ce verbatim sont déjà traitées
             continue
 
-        # Classifier les catégories manquantes
-        verbatim_text = row['verbatim']
+        verbatim_text = row['FBK_VERBATIMS']
+
+        # Classifier les catégories manquantes pour ce verbatim
         for cat_code in missing_cats:
             cat_def = categories.loc[categories['LIB_CATEG'] == cat_code, 'LIB_DESC'].iloc[0]
             result = classify(verbatim_text, cat_code, cat_def)
