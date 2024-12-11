@@ -252,3 +252,54 @@ y_pred = df[list(category_mapping.keys())].values
 report = classification_report(y_true, y_pred, target_names=all_categories, zero_division=0)
 print(report)
 
+----------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+import outlines
+import os
+
+model = outlines.models.transformers("microsoft/Phi-3-mini-4k-instruct")
+
+def classify_verbatims(df, categories, output_path="resultats.csv"):
+    # Charger des résultats partiels s'ils existent
+    if os.path.exists(output_path):
+        df_partials = pd.read_csv(output_path)
+        # Fusionner sur la clé d'identification (id du verbatim) ou autre
+        df = df.merge(df_partials, on="id", how="left", suffixes=("", "_old"))
+        # Déplacer les colonnes déjà existantes
+        for cat in categories['categorie']:
+            if cat in df.columns and f"{cat}_old" in df.columns:
+                df[cat] = df[cat].combine_first(df[f"{cat}_old"])
+                df.drop(columns=[f"{cat}_old"], inplace=True)
+
+    # Itérer sur chaque catégorie
+    for _, row in categories.iterrows():
+        category_name = row['categorie']
+        category_definition = row['definition']
+        col_name = f"{category_name}"
+
+        # Ne traiter que les verbatims non déjà classifiés pour cette catégorie
+        mask_to_process = df[col_name].isna() if col_name in df.columns else [True]*len(df)
+        
+        # Appliquer la classification sur les lignes non traitées
+        for idx in df[mask_to_process].index:
+            verbatim = df.at[idx, 'verbatim']
+            prompt = f"""
+            Tu es un expert en analyse de texte et tu indiques si un verbatim client appartient ou non à une catégorie.
+
+            Voici la définition de la catégorie {category_name} : {category_definition}
+
+            Est ce que le verbatim suivant appartient à la catégorie {category_name} ? : {verbatim}
+            """
+            generator = outlines.generate.choice(model, ["oui", "non"])
+            response = generator(prompt)
+            # Stocker le résultat
+            df.at[idx, col_name] = response
+
+            # Sauvegarde incrémentale (par exemple tous les 100 verbatims)
+            if idx % 100 == 0:
+                df.to_csv(output_path, index=False)
+
+    # Sauvegarde finale
+    df.to_csv(output_path, index=False)
+    return df
