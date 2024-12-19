@@ -1,0 +1,134 @@
+import pandas as pd
+import os
+from transformers import pipeline
+
+# Modèle LLM (à adapter selon vos besoins)
+llm = pipeline("text-generation", model="votre_modele")
+
+def get_category_examples(df, category_name, num_examples=3):
+    """
+    Sélectionne jusqu'à num_examples exemples pour la catégorie category_name,
+    uniquement dans le set d'entraînement (split=='train').
+    Priorité aux exemples n'ayant qu'une seule catégorie (nb_cat == 1).
+    Si pas assez d'exemples à catégorie unique, on complète avec des exemples multi-catégories.
+    """
+    # Filtrer les verbatims qui contiennent la catégorie ET qui sont dans le train
+    cat_examples = df[(df['split'] == 'train') & 
+                      (df['MLC2_CATEG_NIV2'].apply(lambda cats: category_name in cats))]
+
+    # Exemples à une seule catégorie
+    single_cat_examples = cat_examples[cat_examples['nb_cat'] == 1]
+
+    # Sélection des exemples
+    if len(single_cat_examples) >= num_examples:
+        chosen = single_cat_examples.sample(num_examples, random_state=42)
+    else:
+        # On prend tous les single-cat disponibles
+        chosen = single_cat_examples.copy()
+        needed = num_examples - len(chosen)
+        # On complète avec des multi-cat
+        multi_cat_examples = cat_examples[cat_examples['nb_cat'] > 1]
+        if len(multi_cat_examples) > 0:
+            chosen = pd.concat([chosen, multi_cat_examples.sample(min(needed, len(multi_cat_examples)), random_state=42)])
+    
+    return chosen
+
+def classify(verbatim_text, category_name, category_definition, examples):
+    """
+    Classifie un verbatim pour une catégorie donnée en utilisant des exemples.
+    """
+    # Construction de la partie "exemples"
+    examples_text = ""
+    for _, ex_row in examples.iterrows():
+        ex_verbatim = ex_row['FBK_VERBATIM']
+        # Déterminer si l'exemple est dans la catégorie : oui si category_name dans MLC2_CATEG_NIV2
+        ex_label = "oui" if category_name in ex_row['MLC2_CATEG_NIV2'] else "non"
+        examples_text += f"\nExemple:\nVerbatim: \"{ex_verbatim}\"\nAppartient à la catégorie {category_name}? {ex_label}\n"
+
+    system_content = """Tu es un expert en analyse de texte et tu indiques si un verbatim donné appartient ou non à une catégorie. 
+Tu ne réponds que par 'oui' ou par 'non'."""
+
+    prompt_template = f"""Voici la définition de la catégorie {category_name} : {category_definition}
+{examples_text}
+Est-ce que le verbatim suivant appartient à la catégorie {category_name} ?
+"{verbatim_text}"
+Réponds uniquement par "oui" ou "non"."""
+
+    # Appel au LLM
+    output = llm(prompt_template, max_new_tokens=10, do_sample=False)
+    generated_text = output[0]['generated_text']
+
+    # Extraction de la réponse
+    answer = "oui" if "oui" in generated_text.lower() else "non"
+    return answer.strip()
+
+def classify_verbatims(df, categories, output_path="resultats.csv"):
+    """
+    Classifie chaque verbatim pour chaque catégorie, en ajoutant des exemples dynamiques dans le prompt,
+    pris uniquement dans le train, puis sauvegarde après chaque verbatim.
+    
+    Args:
+        df (pd.DataFrame): doit contenir :
+            - 'ID_FBK' : identifiant unique du verbatim
+            - 'FBK_VERBATIM' : le texte du verbatim
+            - 'MLC2_CATEG_NIV2' : array de catégories attribuées à ce verbatim (vérité terrain)
+            - 'nb_cat' : nombre de catégories du verbatim
+            - 'split' : 'train' ou 'test' pour distinguer l'appartenance à l'ensemble
+        categories (pd.DataFrame): doit contenir :
+            - 'LIB_CATEG' : nom de la catégorie (ex: 'c0401')
+            - 'LIB_DESC' : définition textuelle de la catégorie
+        output_path (str): chemin pour sauvegarder les résultats partiels et finaux.
+    
+    Returns:
+        pd.DataFrame: Le DataFrame avec une colonne par catégorie (oui/non).
+    """
+
+    # Charger des résultats partiels s'ils existent
+    if os.path.exists(output_path):
+        df_partials = pd.read_csv(output_path)
+        # Fusion sur ID_FBK
+        df = df.merge(df_partials, on="ID_FBK", how="left", suffixes=("", "_old"))
+        
+        # Combiner les colonnes dupliquées (anciennes et nouvelles)
+        for cat in categories['LIB_CATEG']:
+            if cat in df.columns and f"{cat}_old" in df.columns:
+                df[cat] = df[cat].combine_first(df[f"{cat}_old"])
+                df.drop(columns=[f"{cat}_old"], inplace=True, errors='ignore')
+    else:
+        if "ID_FBK" not in df.columns:
+            raise ValueError("La colonne 'ID_FBK' est requise pour identifier les verbatims.")
+
+    # S'assurer que les colonnes pour chaque catégorie existent
+    for cat in categories['LIB_CATEG']:
+        if cat not in df.columns:
+            df[cat] = None
+
+    # Extraire les catégories en numpy array
+    cat_array = categories['LIB_CATEG'].values
+
+    # Itérer sur chaque verbatim
+    for idx in df.index:
+        row = df.loc[idx]
+        row_values = row[cat_array]
+        missing_mask = row_values.isna().values
+        missing_cats = cat_array[missing_mask]
+
+        if len(missing_cats) == 0:
+            continue
+
+        verbatim_text = row['FBK_VERBATIM']
+
+        # Classifier les catégories manquantes pour ce verbatim
+        for cat_code in missing_cats:
+            cat_def = categories.loc[categories['LIB_CATEG'] == cat_code, 'LIB_DESC'].iloc[0]
+            
+            # Récupérer les exemples pour cette catégorie (uniquement dans le train)
+            examples = get_category_examples(df, cat_code, num_examples=3)
+
+            result = classify(verbatim_text, cat_code, cat_def, examples)
+            df.at[idx, cat_code] = result
+
+        # Sauvegarder après avoir traité toutes les catégories de ce verbatim
+        df.to_csv(output_path, index=False)
+
+    return df
