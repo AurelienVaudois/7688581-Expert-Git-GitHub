@@ -1,0 +1,27 @@
+import pandas as pd
+import ast
+
+# Fonction pour extraire les catégories normalisées
+def extract_categories(value):
+    """ Extrait une liste de catégories d'une valeur brute. """
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)  # Convertir en dict si c'est une chaîne ressemblant à un dict
+            if isinstance(parsed, dict) and 'choices' in parsed:
+                return parsed['choices']  # Retourne la liste des catégories
+        except (ValueError, SyntaxError):
+            pass  # Ignore si la conversion échoue
+    return [value]  # Si c'est une simple chaîne, on la met dans une liste
+
+# Appliquer l'extraction
+df["categories"] = df["sentiment"].apply(extract_categories)
+
+# Exploser la colonne pour avoir une ligne par catégorie
+df_exploded = df.explode("categories")
+
+# Prendre un échantillon équilibré de 100 par catégorie
+df_sampled = df_exploded.groupby("categories", group_keys=False).apply(lambda x: x.sample(n=100, replace=True) if len(x) >= 100 else x)
+
+# Afficher le DataFrame échantillonné
+import ace_tools as tools
+tools.display_dataframe_to_user(name="Échantillon équilibré", dataframe=df_sampled)
