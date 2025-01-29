@@ -132,3 +132,84 @@ def classify_verbatims(df, categories, output_path="resultats.csv"):
         df.to_csv(output_path, index=False)
 
     return df
+
+------------------------------------
+
+import pandas as pd
+import os
+from transformers import pipeline
+
+# Modèle LLM (à adapter selon vos besoins)
+llm = pipeline("text-generation", model="votre_modele")
+
+def select_examples(df_examples, category_name, num_examples=3):
+    """
+    Sélectionne jusqu'à num_examples exemples associés à une catégorie donnée.
+    """
+    category_examples = df_examples[df_examples['Motif'] == category_name]
+    return category_examples.sample(n=min(num_examples, len(category_examples)), random_state=42)
+
+def classify(verbatim_text, category_name, category_definition, examples):
+    """
+    Classifie un verbatim pour une catégorie donnée en utilisant des exemples.
+    """
+    examples_text = ""
+    for _, ex_row in examples.iterrows():
+        ex_verbatim = ex_row['Exemple']
+        examples_text += f"\nExemple:\nVerbatim: \"{ex_verbatim}\"\nAppartient à la catégorie {category_name}? oui\n"
+
+    system_content = """Tu es un expert en analyse de texte et tu indiques si un verbatim donné appartient ou non à une catégorie. 
+    Tu ne réponds que par 'oui' ou par 'non'."""
+
+    prompt_template = f"""Voici la définition de la catégorie {category_name} : {category_definition}
+{examples_text}
+Est-ce que le verbatim suivant appartient à la catégorie {category_name} ?
+"{verbatim_text}"
+Réponds uniquement par "oui" ou "non"."""
+
+    output = llm(prompt_template, max_new_tokens=10, do_sample=False)
+    generated_text = output[0]['generated_text']
+    answer = "oui" if "oui" in generated_text.lower() else "non"
+    return answer.strip()
+
+def classify_verbatims(df, categories, df_examples, output_path="resultats.csv"):
+    """
+    Classifie chaque verbatim pour chaque catégorie en utilisant des exemples provenant d'un DataFrame externe.
+    """
+    if os.path.exists(output_path):
+        df_partials = pd.read_csv(output_path)
+        df = df.merge(df_partials, on="ID_FBK", how="left", suffixes=("", "_old"))
+        for cat in categories['LIB_CATEG']:
+            if cat in df.columns and f"{cat}_old" in df.columns:
+                df[cat] = df[cat].combine_first(df[f"{cat}_old"])
+                df.drop(columns=[f"{cat}_old"], inplace=True, errors='ignore')
+    else:
+        if "ID_FBK" not in df.columns:
+            raise ValueError("La colonne 'ID_FBK' est requise pour identifier les verbatims.")
+
+    for cat in categories['LIB_CATEG']:
+        if cat not in df.columns:
+            df[cat] = None
+
+    cat_array = categories['LIB_CATEG'].values
+    for idx in df.index:
+        row = df.loc[idx]
+        row_values = row[cat_array]
+        missing_mask = row_values.isna().values
+        missing_cats = cat_array[missing_mask]
+
+        if len(missing_cats) == 0:
+            continue
+
+        verbatim_text = row['FBK_VERBATIM']
+
+        for cat_code in missing_cats:
+            cat_def = categories.loc[categories['LIB_CATEG'] == cat_code, 'LIB_DESC'].iloc[0]
+            examples = select_examples(df_examples, cat_code, num_examples=3)
+            result = classify(verbatim_text, cat_code, cat_def, examples)
+            df.at[idx, cat_code] = result
+
+        df.to_csv(output_path, index=False)
+
+    return df
+
