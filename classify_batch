@@ -1,0 +1,25 @@
+def classify_texts_batch(df, text_column, prompt, batch_size=8):
+    # Extraire les textes de la colonne
+    texts = df[text_column].tolist()
+    results = []
+    
+    # Traiter par lots
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i+batch_size]
+        prompts = [prompt.format(text=text) for text in batch]
+        messages_batch = [[{"role": "user", "content": p}] for p in prompts]
+        
+        inputs_batch = [tokenizer.apply_chat_template(m, tokenize=False, add_generation_prompt=True) for m in messages_batch]
+        model_inputs = tokenizer(inputs_batch, padding=True, return_tensors="pt").to(model.device)
+        
+        # Génération des réponses
+        with torch.no_grad():  # Désactiver le calcul des gradients pour économiser de la mémoire
+            generated_ids = model.generate(**model_inputs, max_new_tokens=2000)
+        
+        generated_outputs = [output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)]
+        responses = tokenizer.batch_decode(generated_outputs, skip_special_tokens=True)
+        results.extend(responses)
+    
+    # Ajouter les résultats comme nouvelle colonne
+    df['classification_result'] = results
+    return df
