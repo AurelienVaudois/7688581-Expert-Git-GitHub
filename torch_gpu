@@ -1,0 +1,1 @@
+pip install torch torchvision torchaudio --extra-index-url=https://<your-artifactory-url>/artifactory/api/pypi/pypi-remote/simple --find-links=https://download.pytorch.org/whl/cu124
