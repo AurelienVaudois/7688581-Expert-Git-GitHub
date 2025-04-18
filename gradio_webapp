@@ -71,3 +71,137 @@ with gr.Blocks() as demo:
 # 4. Lancer l'application web
 if __name__ == "__main__":
     demo.launch()
+
+
+#################### V2 ################################################################
+
+import gradio as gr
+import time
+import json # Import json pour une meilleure manipulation potentielle, bien que Gradio le gère souvent automatiquement
+
+# 1. Fonction de classification mise à jour
+def classify_email_placeholder(email_text, top_k, nb_ex_par_categorie):
+    """
+    Fonction de démonstration mise à jour qui simule la classification d'un email.
+    Prend le texte de l'email, top_k et nb_ex_par_categorie en entrée.
+    Retourne la prédiction finale (string) et les catégories/exemples candidats (dictionnaires/listes Python pour JSON).
+    """
+    print(f"Traitement de l'email : {email_text[:50]}...")
+    print(f"Paramètres reçus : top_k={top_k}, nb_ex_par_categorie={nb_ex_par_categorie}")
+
+    # Simule un petit temps de traitement
+    time.sleep(1)
+
+    # Logique de classification factice :
+    if not email_text or len(email_text.strip()) == 0:
+        # Retourne des valeurs vides/par défaut pour les sorties JSON et un message pour la prédiction
+        return "Veuillez entrer le texte d'un email.", {}, {}
+
+    # Simuler la génération de catégories candidates basées sur top_k
+    # Normalement, votre modèle retournerait une liste triée de (catégorie, score)
+    all_categories = [
+        ("Commercial", 0.65),
+        ("Personnel", 0.25),
+        ("Spam", 0.05),
+        ("Promotion", 0.03),
+        ("Important", 0.02)
+    ]
+    # Sélectionne les top_k catégories
+    candidate_categories_list = sorted(all_categories, key=lambda item: item[1], reverse=True)[:int(top_k)]
+    # Formatte en dictionnaire pour la sortie JSON
+    candidate_categories_json = {cat: score for cat, score in candidate_categories_list}
+
+    # Simuler la génération d'exemples candidats basés sur nb_ex_par_categorie
+    # Crée un dictionnaire où chaque clé est une catégorie candidate
+    # et la valeur est une liste d'exemples simulés.
+    candidate_examples_json = {}
+    for cat, score in candidate_categories_list:
+        examples = [f"Exemple {cat} #{i+1} (similaire)" for i in range(int(nb_ex_par_categorie))]
+        candidate_examples_json[cat] = examples
+
+    # Détermine la prédiction finale (la plus probable des candidates)
+    if candidate_categories_list:
+        final_prediction = candidate_categories_list[0][0]
+    else:
+        final_prediction = "Inconnue"
+
+    print("Classification terminée.")
+    print(f"Prediction: {final_prediction}")
+    print(f"Categories Candidates (JSON): {candidate_categories_json}")
+    print(f"Exemples Candidates (JSON): {candidate_examples_json}")
+
+
+    # IMPORTANT: L'ordre de retour doit correspondre à l'ordre dans la liste 'outputs' de .click()
+    # Ordre souhaité : Prédiction finale, Catégories JSON, Exemples JSON
+    return final_prediction, candidate_categories_json, candidate_examples_json
+
+# 2. Création de l'interface Gradio
+with gr.Blocks() as demo:
+    gr.Markdown("# Classificateur d'Emails")
+    gr.Markdown("Collez le contenu d'un email, ajustez les paramètres si besoin, et cliquez sur 'Classifier'.")
+
+    with gr.Row():
+        # Zone de saisie pour l'email
+        email_input = gr.Textbox(
+            lines=10,
+            label="Email à classifier",
+            placeholder="Collez ici le contenu complet de l'email..."
+        )
+
+    # --- NOUVEAU : Paramètres au-dessus du bouton ---
+    gr.Markdown("### Paramètres de Classification")
+    with gr.Row():
+         # Slider pour top_k
+        top_k_slider = gr.Slider(
+            minimum=1,
+            maximum=10,
+            value=3, # Valeur par défaut
+            step=1,
+            label="Top K Catégories",
+            info="Nombre de catégories les plus probables à afficher."
+        )
+        # Slider pour nb_ex_par_categorie
+        nb_ex_slider = gr.Slider(
+            minimum=0,
+            maximum=5,
+            value=2, # Valeur par défaut
+            step=1,
+            label="Nb Exemples par Catégorie",
+            info="Nombre d'exemples similaires à afficher pour chaque catégorie candidate."
+        )
+    # -----------------------------------------------
+
+    # Bouton pour soumettre
+    submit_button = gr.Button("Classifier l'Email")
+
+    gr.Markdown("---") # Séparateur visuel
+    gr.Markdown("## Résultats de la classification")
+
+    # --- NOUVEAU : Prédiction finale en premier ---
+    # Zone de sortie pour la prédiction finale (placée en haut des résultats)
+    output_prediction = gr.Textbox(label="Prédiction finale de la catégorie", interactive=False)
+    # ---------------------------------------------
+
+    with gr.Row():
+        # Zone de sortie pour les catégories candidates (format JSON)
+        output_categories_json = gr.JSON(label="Catégories candidates (scores simulés)")
+
+        # Zone de sortie pour les exemples candidats (format JSON)
+        output_examples_json = gr.JSON(label="Exemples candidats (simulés)")
+
+
+    # 3. Lier le bouton à la fonction (avec les nouvelles entrées et sorties)
+    submit_button.click(
+        fn=classify_email_placeholder,
+        # Ajout des sliders dans les inputs
+        inputs=[email_input, top_k_slider, nb_ex_slider],
+        # Mise à jour de l'ordre et du type des outputs
+        # 1. Prédiction (Textbox)
+        # 2. Catégories (JSON)
+        # 3. Exemples (JSON)
+        outputs=[output_prediction, output_categories_json, output_examples_json]
+    )
+
+# 4. Lancer l'application web
+if __name__ == "__main__":
+    demo.launch()
