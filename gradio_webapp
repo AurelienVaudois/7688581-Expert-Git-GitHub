@@ -1,0 +1,73 @@
+import gradio as gr
+import time # Juste pour simuler un petit délai de traitement
+
+# 1. Fonction de classification "vanilla" (placeholder)
+def classify_email_placeholder(email_text):
+    """
+    Fonction de démonstration qui simule la classification d'un email.
+    Prend le texte de l'email en entrée et retourne des données factices
+    pour les catégories candidates, les exemples et la prédiction finale.
+    """
+    print(f"Traitement de l'email : {email_text[:50]}...") # Affiche le début de l'email dans la console
+
+    # Simule un petit temps de traitement
+    time.sleep(1)
+
+    # Logique de classification factice :
+    # Pour cette démo, on retourne toujours les mêmes valeurs.
+    # Vous remplacerez cette partie par votre vraie logique de classification.
+    if not email_text or len(email_text.strip()) == 0:
+        return "N/A", "N/A", "Veuillez entrer le texte d'un email."
+
+    candidate_categories = "Commercial (Score: 0.6), Personnel (Score: 0.3), Spam (Score: 0.1)"
+    candidate_examples = "Exemple 1 (similaire), Exemple 2 (différent), Exemple 3 (spam)"
+    final_prediction = "Commercial" # La catégorie jugée la plus probable
+
+    print("Classification terminée.")
+
+    # Retourne les trois valeurs qui correspondent aux composants de sortie définis dans l'interface
+    return candidate_categories, candidate_examples, final_prediction
+
+# 2. Création de l'interface Gradio
+with gr.Blocks() as demo:
+    gr.Markdown("# Classificateur d'Emails")
+    gr.Markdown("Collez le contenu d'un email ci-dessous et cliquez sur 'Classifier' pour obtenir une prédiction de catégorie.")
+
+    with gr.Row():
+        # Zone de saisie pour l'email
+        email_input = gr.Textbox(
+            lines=10,
+            label="Email à classifier",
+            placeholder="Collez ici le contenu complet de l'email..."
+        )
+
+    # Bouton pour soumettre
+    submit_button = gr.Button("Classifier l'Email")
+
+    gr.Markdown("---") # Séparateur visuel
+    gr.Markdown("## Résultats de la classification")
+
+    with gr.Row():
+        # Zone de sortie pour les catégories candidates
+        output_categories = gr.Textbox(label="Catégories candidates (avec scores simulés)")
+
+        # Zone de sortie pour les exemples candidats
+        output_examples = gr.Textbox(label="Exemples candidats (simulés)")
+
+    # Zone de sortie pour la prédiction finale
+    output_prediction = gr.Textbox(label="Prédiction finale de la catégorie")
+
+    # 3. Lier le bouton à la fonction
+    # Quand le bouton est cliqué, la fonction 'classify_email_placeholder' est appelée
+    # avec le contenu de 'email_input' comme argument.
+    # Les valeurs retournées par la fonction sont affichées dans les composants de sortie
+    # dans l'ordre spécifié dans la liste 'outputs'.
+    submit_button.click(
+        fn=classify_email_placeholder,
+        inputs=email_input,
+        outputs=[output_categories, output_examples, output_prediction]
+    )
+
+# 4. Lancer l'application web
+if __name__ == "__main__":
+    demo.launch()
