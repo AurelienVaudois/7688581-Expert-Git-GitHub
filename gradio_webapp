@@ -205,3 +205,158 @@ with gr.Blocks() as demo:
 # 4. Lancer l'application web
 if __name__ == "__main__":
     demo.launch()
+
+
+------------------------ VERSIO CLAUDE ------------------------------------------------------------------------------------------
+
+import gradio as gr
+import time # Juste pour simuler un petit délai de traitement
+
+# 1. Fonction de classification "vanilla" (placeholder)
+def classify_email_placeholder(email_text):
+    """
+    Fonction de démonstration qui simule la classification d'un email.
+    Prend le texte de l'email en entrée et retourne des données factices
+    pour les catégories candidates, les exemples et la prédiction finale.
+    """
+    print(f"Traitement de l'email : {email_text[:50]}...") # Affiche le début de l'email dans la console
+
+    # Simule un petit temps de traitement
+    time.sleep(1)
+
+    # Logique de classification factice :
+    # Pour cette démo, on retourne toujours les mêmes valeurs.
+    # Vous remplacerez cette partie par votre vraie logique de classification.
+    if not email_text or len(email_text.strip()) == 0:
+        return "N/A", "N/A", "Veuillez entrer le texte d'un email.", "#FFDDDD", "⚠️ Erreur"
+
+    candidate_categories = "Commercial (Score: 0.6), Personnel (Score: 0.3), Spam (Score: 0.1)"
+    candidate_examples = "Exemple 1 (similaire), Exemple 2 (différent), Exemple 3 (spam)"
+    
+    # La catégorie jugée la plus probable
+    final_prediction = "Commercial"
+    
+    # Couleur de fond en fonction de la prédiction
+    if final_prediction == "Commercial":
+        bg_color = "#E3F2FD" # Bleu clair
+        icon = "📊 Commercial"
+    elif final_prediction == "Personnel":
+        bg_color = "#E8F5E9" # Vert clair
+        icon = "👤 Personnel"
+    elif final_prediction == "Spam":
+        bg_color = "#FFEBEE" # Rouge clair
+        icon = "🚫 Spam"
+    else:
+        bg_color = "#F5F5F5" # Gris clair
+        icon = "❓ Autre"
+
+    print("Classification terminée.")
+
+    # Retourne les cinq valeurs: catégories, exemples, prédiction, couleur de fond et icône
+    return candidate_categories, candidate_examples, final_prediction, bg_color, icon
+
+# 2. Création de l'interface Gradio
+with gr.Blocks(css="""
+    .prediction-box { 
+        font-size: 24px; 
+        text-align: center; 
+        padding: 20px; 
+        border-radius: 10px; 
+        margin-top: 10px;
+        font-weight: bold;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+    .result-section {
+        margin-top: 20px;
+    }
+    .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+    }
+""") as demo:
+    gr.Markdown("# 📧 Classificateur d'Emails")
+    gr.Markdown("Collez le contenu d'un email ci-dessous et cliquez sur 'Classifier' pour obtenir une prédiction de catégorie.")
+
+    with gr.Row():
+        # Zone de saisie pour l'email
+        email_input = gr.Textbox(
+            lines=10,
+            label="Email à classifier",
+            placeholder="Collez ici le contenu complet de l'email..."
+        )
+
+    # Bouton pour soumettre avec une icône
+    with gr.Row():
+        submit_button = gr.Button("🔍 Classifier l'Email", variant="primary", scale=2)
+
+    # Section résultats
+    with gr.Row(visible=False) as result_container:
+        gr.Markdown("## 📊 Résultats de l'analyse", elem_classes=["result-section"])
+    
+    # Ajout d'une notification visuelle pendant le traitement
+    loading_indicator = gr.HTML(visible=False, value="<div class='prediction-box' style='background-color: #F0F4F8;'><span class='spinner'>⏳</span> Classification en cours...</div>")
+    
+    # Zone visuelle pour la prédiction finale (avec mise en valeur)
+    prediction_html = gr.HTML(visible=False, value="<div class='prediction-box'>Résultat de la classification</div>")
+    
+    # Zones moins visibles pour les détails
+    with gr.Accordion("Détails de la classification", open=False, visible=False) as details_accordion:
+        output_categories = gr.Textbox(label="Catégories candidates")
+        output_examples = gr.Textbox(label="Exemples similaires")
+        output_prediction_hidden = gr.Textbox(label="Prédiction brute", visible=False)
+    
+    # Variables de stockage (non visibles)
+    bg_color = gr.Textbox(visible=False)
+    prediction_icon = gr.Textbox(visible=False)
+
+    # 3. Fonction pour afficher le résultat avec animation
+    def update_prediction_display(categories, examples, prediction, background_color, icon):
+        # Afficher tous les éléments de résultat
+        result_html = f"""
+        <div class='prediction-box' style='background-color: {background_color};'>
+            <span style='font-size: 36px;'>{icon}</span><br>
+            Classification: <span>{prediction}</span>
+        </div>
+        """
+        return {
+            result_container: gr.update(visible=True),
+            loading_indicator: gr.update(visible=False),
+            prediction_html: gr.update(visible=True, value=result_html),
+            details_accordion: gr.update(visible=True),
+            output_categories: categories,
+            output_examples: examples,
+            output_prediction_hidden: prediction,
+            bg_color: background_color,
+            prediction_icon: icon
+        }
+    
+    # Fonction pour montrer l'indicateur de chargement
+    def show_loading():
+        return {
+            loading_indicator: gr.update(visible=True),
+            prediction_html: gr.update(visible=False),
+            details_accordion: gr.update(visible=False)
+        }
+
+    # 4. Lier le bouton à la fonction
+    submit_button.click(
+        fn=show_loading,
+        inputs=None,
+        outputs=[loading_indicator, prediction_html, details_accordion]
+    ).then(
+        fn=classify_email_placeholder,
+        inputs=email_input,
+        outputs=[output_categories, output_examples, output_prediction_hidden, bg_color, prediction_icon]
+    ).then(
+        fn=update_prediction_display,
+        inputs=[output_categories, output_examples, output_prediction_hidden, bg_color, prediction_icon],
+        outputs=[result_container, loading_indicator, prediction_html, details_accordion, 
+                output_categories, output_examples, output_prediction_hidden, bg_color, prediction_icon]
+    )
+
+# 5. Lancer l'application web
+if __name__ == "__main__":
+    demo.launch()
