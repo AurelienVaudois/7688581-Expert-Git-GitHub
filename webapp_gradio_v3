@@ -281,3 +281,46 @@ def main():
 
 if __name__ == "__main__":
     main()
+####################### UPDATE###############################
+
+# 1) Helper pour (re)remplir le menu déroulant ---------------------------
+def fill_dropdown(page: int):
+    """Construit le gr.update pour le Dropdown."""
+    return gr.update(
+        choices=[f"{i} – {s}" for i, s in fetch_choices(page)],
+        value=None          # réinitialise la sélection
+    )
+
+# 2) Callback générique de navigation ------------------------------------
+def nav(cur: int, delta: int):
+    """calcule la nouvelle page et renvoie toutes les mises à jour."""
+    new = max(0, min(max_page, cur + delta))          # borne 0..max_page
+    dd_update = fill_dropdown(new)                    # gr.update pour le dropdown
+    return (
+        new,                                          # -> page_state
+        dd_update,                                    # -> dropdown
+        f"Page {new+1}/{max_page+1}",                 # -> page_label
+        "",                                           # -> mail_box (vide)
+        None,                                         # -> sel_id (None)
+        gr.update(visible=False)                      # -> accordion masqué
+    )
+
+# 3) Deux wrappers sans constante littérale ------------------------------
+def nav_prev(cur):
+    return nav(cur, -1)
+
+def nav_next(cur):
+    return nav(cur, 1)
+
+# 4) Wiring des boutons ---------------------------------------------------
+prev_btn.click(
+    nav_prev,
+    inputs=[page_state],                              # seulement des composants
+    outputs=[page_state, dropdown, page_label, mail_box, sel_id, acc]
+)
+
+next_btn.click(
+    nav_next,
+    inputs=[page_state],
+    outputs=[page_state, dropdown, page_label, mail_box, sel_id, acc]
+)
