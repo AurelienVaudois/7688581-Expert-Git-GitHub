@@ -1,0 +1,283 @@
+# email_classification_app.py
+"""
+Gradio – Classification, **Extraction d’informations structurées**, Pagination & Évaluation
+=======================================================================================
+
+Cette version réintroduit :
+* **Extraction d’info** via `StructuredOutputParser` (affichée dans un `gr.Accordion`).
+* **JSON des catégories candidates** (catégories + scores potentiels).
+* Correction : plus d’appel `.update()` sur l’objet `Dropdown` (compat v3 et v4).
+
+---
+```bash
+pip install gradio pandas openpyxl haystack-ai openai python-dotenv httpx sqlite-utils
+```
+"""
+
+from __future__ import annotations
+
+import difflib
+import os
+import re
+import sqlite3
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import gradio as gr
+import httpx
+import openai
+import pandas as pd
+from dotenv import load_dotenv
+from haystack import Document
+from haystack.components.builders.chat_prompt_builder import ChatPromptBuilder
+from haystack.components.embedders.openai_document_embedder import OpenAIDocumentEmbedder
+from haystack.components.embedders.openai_text_embedder import OpenAITextEmbedder
+from haystack.dataclasses.chat_message import ChatMessage
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.document_stores.types import DuplicatePolicy
+
+# --- extraction structured output
+from src.structured import StructuredOutputParser, ResponseSchema
+
+SCHEMAS = [
+    ResponseSchema(name="numero_compte", description="Numéro de compte du client", type="string"),
+    ResponseSchema(name="montant", description="Montant concerné", type="string"),
+]
+OUTPUT_PARSER = StructuredOutputParser(SCHEMAS)
+
+# ---------------------------------------------------------------------------
+# 0. Configuration & constantes
+# ---------------------------------------------------------------------------
+DB_PATH = Path("emails.db")
+EXCEL_MAILS_PATH = Path("/mnt/data/mails_corpo/mails_15k.xlsx")
+EXCEL_EXAMPLES_PATH = Path("/mnt/data/mails_corpo/cheque.xlsx")
+SHEET_EXAMPLES = "Exemples par Motif"
+
+EMBEDDER_URL = os.getenv("EMEDDER_URL") or "https://…/Embedding/v1"
+LLM_URL = os.getenv("LLM_URL") or "https://…/tgi-qwen/v1"
+
+PAGE_SIZE = 100  # mails par page
+
+EXTRA_COLS = ["prediction", "eval_status", "eval_comment"]
+
+# ---------------------------------------------------------------------------
+# 1. Import des mails ➜ SQLite (si 1er lancement)
+# ---------------------------------------------------------------------------
+
+def import_mails_once():
+    if DB_PATH.exists():
+        return
+    if not EXCEL_MAILS_PATH.exists():
+        raise FileNotFoundError(f"❌ Excel manquant : {EXCEL_MAILS_PATH}")
+    df = pd.read_excel(EXCEL_MAILS_PATH)
+    df.columns = [re.sub(r"\s+", "_", c).lower() for c in df.columns]
+    for col in EXTRA_COLS:
+        if col not in df.columns:
+            df[col] = None
+    with sqlite3.connect(DB_PATH) as conn:
+        df.to_sql("emails", conn, if_exists="replace", index=False)
+
+# ---------------------------------------------------------------------------
+# 2. Initialisation Haystack (retrieval + exemples)
+# ---------------------------------------------------------------------------
+print("⏳ Chargement exemples…")
+df_ex = pd.read_excel(EXCEL_EXAMPLES_PATH, sheet_name=SHEET_EXAMPLES)
+example_docs = [Document(content=r["Exemple"], meta={"categorie": r["Motif"]}) for _, r in df_ex.iterrows()]
+
+guide_df = pd.read_excel(EXCEL_EXAMPLES_PATH).iloc[1:, 1:]
+headers = guide_df.iloc[0]
+cat_df = guide_df[1:]
+cat_df.columns = headers
+CAT2CTX: Dict[str, Dict[str, str]] = {r["Motif"]: {"definition": r["Définition"]} for _, r in cat_df.iterrows()}
+ALL_CATEGORIES = list(CAT2CTX.keys())
+
+load_dotenv(); openai.api_key = os.getenv("OPENAI_API_KEY") or "None"
+
+embedder = OpenAIDocumentEmbedder(model="mistral", api_base_url=EMBEDDER_URL, http_client_kwargs={"verify": False})
+example_docs = embedder.run(documents=example_docs)["documents"]
+STORE = InMemoryDocumentStore(embedding_similarity_function="cosine")
+STORE.write_documents(example_docs, policy=DuplicatePolicy.SKIP)
+
+TEXT_EMB = OpenAITextEmbedder(model="embedding", api_base_url=EMBEDDER_URL, prefix="Instruct: Given an email, determine its email\nQuery: ", http_client_kwargs={"verify": False})
+PROMPT_BUILDER = ChatPromptBuilder(template=[ChatMessage.from_user("""# Role\nCatégorisez l'e‑mail :\n{% for c in cats %}- {{c['category']}} : {{c['definition']}}{% endfor %}\n\nExemples :\n{% for ex in exs %}- {{ex['example']}} → {{ex['category']}}{% endfor %}\n\nE‑mail : {{email}}""")])
+CLIENT = openai.OpenAI(api_key="None", base_url=LLM_URL, http_client=httpx.Client(verify=False))
+
+# ---------------------------------------------------------------------------
+# 3. Helpers DB + pagination
+# ---------------------------------------------------------------------------
+
+def fetch_choices(page: int = 0) -> List[Tuple[int, str]]:
+    off = page * PAGE_SIZE
+    with sqlite3.connect(DB_PATH) as conn:
+        df = pd.read_sql_query(
+            "SELECT rowid AS id, subject, message_clean FROM emails LIMIT ? OFFSET ?",
+            conn,
+            params=(PAGE_SIZE, off),
+        )
+    res = []
+    for r in df.itertuples():
+        subj = r.subject if pd.notna(r.subject) else (r.message_clean or "")[:40] + "…"
+        res.append((int(r.id), subj))
+    return res
+
+
+def total_rows() -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0]
+
+
+def save_prediction(rid: int, pred: str):
+    with sqlite3.connect(DB_PATH) as c:
+        c.execute("UPDATE emails SET prediction=? WHERE rowid=?", (pred, rid)); c.commit()
+
+
+def save_evaluation(rid: int, st: str, comm: str):
+    with sqlite3.connect(DB_PATH) as c:
+        c.execute("UPDATE emails SET eval_status=?, eval_comment=? WHERE rowid=?", (st, comm, rid)); c.commit()
+
+# ---------------------------------------------------------------------------
+# 4. Retrieval + classification + extraction
+# ---------------------------------------------------------------------------
+
+def retrieve_examples(email: str, k: int = 20, per_cat: int = 5):
+    emb = TEXT_EMB.run(text=email)["embedding"]
+    hits = STORE.embedding_retrieval(query_embedding=emb, top_k=k)
+    by_cat, cats_set = {}, set()
+    for d in hits:
+        c = d.meta["categorie"]; cats_set.add(c); by_cat.setdefault(c, []).append(d.content)
+    exs = [{"example": e, "category": c} for c, lst in by_cat.items() for e in lst[:per_cat]]
+    cats = [{"category": c, "definition": CAT2CTX[c]["definition"]} for c in cats_set]
+    return exs, cats
+
+
+def classify_and_extract(email: str):
+    exs, cats = retrieve_examples(email)
+    msgs = PROMPT_BUILDER.run(cats=cats, exs=exs, email=email)["prompt"]
+    resp = CLIENT.chat.completions.create(model="", messages=[m.to_openai_dict_format() for m in msgs], temperature=0, max_tokens=50)
+    label = resp.choices[0].message.content.strip()
+    if label not in ALL_CATEGORIES:
+        label = difflib.get_close_matches(label, ALL_CATEGORIES, n=1) or ["Autre"]
+        label = label[0]
+
+    # extraction info
+    extraction_prompt = f"""{OUTPUT_PARSER.get_format_instructions()}\n\nEmail:\n{email}"
+    ext_resp = CLIENT.chat.completions.create(
+        model="",
+        messages=[{"role": "user", "content": extraction_prompt}],
+        temperature=0,
+        max_tokens=300,
+    )
+    try:
+        infos = OUTPUT_PARSER.parse(ext_resp.choices[0].message.content)
+    except Exception:
+        infos = {}
+
+    return label, cats, infos
+
+# ---------------------------------------------------------------------------
+# 5. UI (pagination + accordion détails)
+# ---------------------------------------------------------------------------
+
+def build_ui() -> gr.Blocks:
+    total = total_rows(); max_page = (total - 1) // PAGE_SIZE
+    with gr.Blocks() as demo:
+        gr.Markdown("## Parcours mails → Classification → Extraction → Évaluation")
+
+        page_state, sel_id, eval_state = gr.State(0), gr.State(None), gr.State(None)
+
+        with gr.Row():
+            prev_btn = gr.Button("◀ Page précédente")
+            page_label = gr.Markdown()
+            next_btn = gr.Button("Page suivante ▶")
+
+        # Dropdown (rempli dynamiquement)
+        dropdown = gr.Dropdown(label="Mails", choices=[f"{i} – {s}" for i, s in fetch_choices(0)], interactive=True)
+        mail_box = gr.Textbox(label="message_clean", lines=12, interactive=False)
+        classify_btn = gr.Button("Classifier & Extraire", variant="primary")
+        pred_html = gr.HTML()
+
+        # Accordion détails
+        with gr.Accordion("Détails de la classification", open=False, visible=False) as acc:
+            with gr.Row():
+                out_cats = gr.JSON(label="Catégories candidates")
+                out_infos = gr.JSON(label="Informations extraites")
+        # Hidden raw prediction (si tu veux le garder)
+        raw_pred = gr.Textbox(visible=False)
+
+        # Evaluation zone
+        gr.Markdown("### Évaluation humaine")
+        with gr.Row():
+            valider = gr.Button("Valider")
+            invalider = gr.Button("Invalider", variant="stop")
+        comment_box = gr.Textbox(label="Commentaire", lines=3)
+        save_btn = gr.Button("Enregistrer l’évaluation")
+        save_msg = gr.Markdown()
+
+        # helpers
+        def dropdown_data(page: int):
+            choices = [f"{i} – {s}" for i, s in fetch_choices(page)]
+            return gr.update(choices=choices, value=None), f"Page {page+1}/{max_page+1}"
+
+        # nav callbacks
+        def nav(delta: int, cur: int):
+            new = max(0, min(max_page, cur + delta))
+            dd, label = dropdown_data(new)
+            return new, dd, label, "", None, gr.update(visible=False)
+
+        prev_btn.click(nav, [-1, page_state], [page_state, dropdown, page_label, mail_box, sel_id, acc])
+        next_btn.click(nav, [1, page_state], [page_state, dropdown, page_label, mail_box, sel_id, acc])
+
+        # select mail
+        def on_select(choice: str):
+            if not choice:
+                return "", None
+            rid = int(choice.split(" – ")[0])
+            with sqlite3.connect(DB_PATH) as conn:
+                txt = pd.read_sql_query("SELECT message_clean FROM emails WHERE rowid=?", conn, params=(rid,)).iloc[0, 0]
+            return txt, rid
+
+        dropdown.change(on_select, dropdown, [mail_box, sel_id])
+
+        # classify
+        def on_classify(text: str, rid: int | None):
+            if not text:
+                return "<vide>", {}, {}, gr.update(visible=False)
+            pred, cats, infos = classify_and_extract(text)
+            if rid:
+                save_prediction(rid, pred)
+            return (
+                f"<div style='font-size:22px;font-weight:bold;text-align:center'>{pred}</div>",
+                cats,
+                infos,
+                gr.update(visible=True),
+            )
+
+        classify_btn.click(on_classify, [mail_box, sel_id], [pred_html, out_cats, out_infos, acc])
+
+        # eval buttons
+        valider.click(lambda: "valider", None, eval_state)
+        invalider.click(lambda: "invalider", None, eval_state)
+
+        def on_save(rid: int | None, st: str | None, comm: str):
+            if rid is None:
+                return "❌ Choisissez un mail."
+            if st not in {"valider", "invalider"}:
+                return "❌ Sélectionnez Valider/Invalider."
+            save_evaluation(rid, st, comm)
+            return "✅ Enregistré"
+
+        save_btn.click(on_save, [sel_id, eval_state, comment_box], save_msg)
+
+    return demo
+
+# ---------------------------------------------------------------------------
+# 6. Main
+# ---------------------------------------------------------------------------
+
+def main():
+    import_mails_once()
+    build_ui().launch(server_name="0.0.0.0", server_port=8888)
+
+
+if __name__ == "__main__":
+    main()
