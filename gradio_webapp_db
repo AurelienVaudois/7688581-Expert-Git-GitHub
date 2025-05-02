@@ -1,177 +1,171 @@
 # email_classification_app.py
 """
-Web‑app Gradio pour :
-1. Importer un fichier Excel d'e‑mails dans une base SQLite.
-2. Parcourir des exemples, lancer la classification (modèle local) et afficher / stocker la prédiction.
-3. Valider ou invalider la prédiction, saisir un commentaire.
-4. Enregistrer l'évaluation dans la même ligne de la base.
+Web‑app Gradio pour la **classification assistée par LLM** et l’évaluation de mails.
 
-Utilisation rapide :
-    python email_classification_app.py --import mails.xlsx  # (ré)importe + lance l'UI
-    python email_classification_app.py                      # lance l'UI avec la base existante
+Fonctionnalités :
+1. **Import initial automatique** d’un fichier Excel (défini par le développeur) → base SQLite.
+2. Parcours d’exemples, appel LLM pour obtenir la prédiction (colonne `prediction`).
+3. Validation/Invalida­tion + commentaire utilisateur → colonnes `eval_status`, `eval_comment`.
+4. Persistance totale : toute mise à jour est immédiatement commitée dans le fichier `emails.db`.
+
+> ℹ️ L’utilisateur **n’a aucun contrôle** sur l’import ; il ne peut que sélectionner un exemple, classifier et évaluer.
 
 Prérequis :
-  pip install gradio pandas openpyxl scikit‑learn joblib
+```bash
+pip install gradio pandas openpyxl openai python-dotenv
+```
+– Placez votre clé dans une variable d’environnement `OPENAI_API_KEY` ou un fichier `.env` (`python‑dotenv` la lira automatiquement).
 """
 
 from __future__ import annotations
 
-import argparse
+import os
 import re
 import sqlite3
 from pathlib import Path
 from typing import List, Tuple
 
 import gradio as gr
-import joblib
+import openai
 import pandas as pd
+from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
-# 0. Configuration des chemins
+# 0. Configuration
 # ---------------------------------------------------------------------------
-DB_PATH = Path("emails.db")
-MODEL_PATH = Path("model.pkl")
+DB_PATH = Path("emails.db")             # Base persistance
+EXCEL_PATH = Path("mails.xlsx")         # Fichier source choisi par *vous*
+
+LLM_MODEL = "gpt-4o-mini"               # Nom du modèle OpenAI à utiliser
+SYSTEM_PROMPT = (
+    "Vous êtes un système de classification d’e‑mails professionnel. "
+    "Vous recevez le corps d’un mail (champ message_clean) et vous devez renvoyer "
+    "uniquement le code de catégorie fonctionnelle attendu, sans explications."
+)
+
+# Charger la clé API
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Colonnes ajoutées pour le workflow
+EXTRA_COLS = ["prediction", "eval_status", "eval_comment"]
 
 # ---------------------------------------------------------------------------
-# 1. Import Excel ➜ SQLite : ajout automatique des colonnes manquantes
+# 1. Import (une fois) Excel ➜ SQLite
 # ---------------------------------------------------------------------------
-REQUIRED_EXTRA_COLS = ["prediction", "eval_status", "eval_comment"]
 
+def import_excel_once() -> None:
+    """Si la base n’existe pas, crée `emails.db` à partir de `EXCEL_PATH`."""
+    if DB_PATH.exists():
+        return  # Rien à faire
 
-def import_excel_to_db(excel_path: Path, db_path: Path = DB_PATH) -> None:
-    """Charge un fichier Excel dans la table « emails » d'une base SQLite.
+    if not EXCEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Fichier Excel source absent : {EXCEL_PATH}. Placez‑le puis relancez."
+        )
 
-    Les colonnes `prediction`, `eval_status`, `eval_comment` sont créées si
-    absentes pour permettre le suivi complet du workflow.
-    """
-
-    print(f"Import de {excel_path} → {db_path} …")
-    df = pd.read_excel(excel_path)
-
-    # Nettoyage des en‑têtes (espaces → underscores, tout en minuscules)
+    print(f"🚀 Première initialisation : import de {EXCEL_PATH} → {DB_PATH}")
+    df = pd.read_excel(EXCEL_PATH)
     df.columns = [re.sub(r"\s+", "_", c).lower() for c in df.columns]
-
-    # Colonnes supplémentaires nécessaires au workflow
-    for col in REQUIRED_EXTRA_COLS:
+    for col in EXTRA_COLS:
         if col not in df.columns:
             df[col] = None
-
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(DB_PATH) as conn:
         df.to_sql("emails", conn, if_exists="replace", index=False)
-
-    print("✅ Import terminé.")
+    print("✅ Base créée.")
 
 # ---------------------------------------------------------------------------
-# 2. Fonctions utilitaires base de données
+# 2. Fonctions utilitaires DB
 # ---------------------------------------------------------------------------
 
 def fetch_choices(limit: int = 100) -> List[Tuple[int, str]]:
-    """Renvoie une liste (id, subject) pour le dropdown d'exemples."""
     with sqlite3.connect(DB_PATH) as conn:
         df = pd.read_sql_query(
-            "SELECT rowid AS id, subject FROM emails LIMIT ?",
-            conn,
-            params=(limit,),
+            "SELECT rowid AS id, subject FROM emails LIMIT ?", conn, params=(limit,)
         )
     return [(int(r.id), r.subject) for r in df.itertuples()]
 
 
 def load_email(row_id: int) -> pd.Series:
-    """Charge une ligne complète à partir de son rowid."""
     with sqlite3.connect(DB_PATH) as conn:
         df = pd.read_sql_query(
-            "SELECT rowid AS id, * FROM emails WHERE rowid = ?",
-            conn,
-            params=(row_id,),
+            "SELECT rowid AS id, * FROM emails WHERE rowid = ?", conn, params=(row_id,)
         )
     if df.empty:
-        raise ValueError(f"Aucun mail avec id={row_id}")
+        raise ValueError(f"Mail id={row_id} introuvable")
     return df.iloc[0]
 
 
 def save_prediction(row_id: int, prediction: str) -> None:
-    """Met à jour la colonne prediction pour la ligne donnée."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "UPDATE emails SET prediction = ? WHERE rowid = ?",
-            (prediction, row_id),
+            "UPDATE emails SET prediction = ? WHERE rowid = ?", (prediction, row_id)
         )
         conn.commit()
 
 
-def save_evaluation(row_id: int, eval_status: str, comment: str) -> None:
-    """Sauvegarde l'évaluation (statut + commentaire)."""
+def save_evaluation(row_id: int, status: str, comment: str) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "UPDATE emails SET eval_status = ?, eval_comment = ? WHERE rowid = ?",
-            (eval_status, comment, row_id),
+            (status, comment, row_id),
         )
         conn.commit()
 
 # ---------------------------------------------------------------------------
-# 3. Chargement du modèle (scikit‑learn pipeline sérialisé)
+# 3. Appel LLM
 # ---------------------------------------------------------------------------
-
-if MODEL_PATH.exists():
-    MODEL = joblib.load(MODEL_PATH)
-else:
-    MODEL = None
-    print("⚠️  Avertissement : modèle introuvable – la prédiction renverra <no model>.")
-
 
 def classify(text: str) -> str:
-    """Effectue la prédiction brute (sans persistante)."""
-    if MODEL is None:
-        return "<no model>"
+    if not openai.api_key:
+        return "<API key manquante>"
     try:
-        return str(MODEL.predict([text])[0])
+        response = openai.ChatCompletion.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+        )
+        label = response.choices[0].message["content"].strip()
+        return label
     except Exception as exc:
-        return f"Erreur modèle: {exc}"
+        return f"Erreur LLM : {exc}"
 
 # ---------------------------------------------------------------------------
-# 4. Construction de l'interface Gradio
+# 4. Interface Gradio
 # ---------------------------------------------------------------------------
 
 def build_interface() -> gr.Blocks:
-    """Construit et renvoie l'UI Gradio complète."""
+    with gr.Blocks(title="LLM Mail Classifier") as demo:
+        gr.Markdown("## Sélectionnez un mail, lancez la classification, évaluez")
 
-    with gr.Blocks(title="Classification & Évaluation de mails") as demo:
-        gr.Markdown("## Choisissez un exemple ou saisissez un nouveau mail")
-
-        # Sélecteur d'exemples (id – subject)
         example_choice = gr.Dropdown(
             label="Exemples (id – subject)",
-            choices=[f"{id_} – {subj}" for id_, subj in fetch_choices()],
+            choices=[f"{i} – {s}" for i, s in fetch_choices()],
             interactive=True,
         )
-        selected_id = gr.State(value=None)  # conserver le rowid sélectionné
+        selected_id = gr.State(value=None)
 
-        # Zone de texte contenant le corps du mail (message_clean)
         mail_input = gr.Textbox(
-            label="Contenu du mail (message_clean)",
-            placeholder="Corps du mail…",
-            lines=15,
+            label="message_clean", lines=15, interactive=False  # lecture seule
         )
 
-        # Section classification
-        classify_btn = gr.Button("Classifier")
-        prediction_output = gr.Textbox(label="Prédiction du modèle", interactive=False)
+        classify_btn = gr.Button("Classifier avec LLM")
+        prediction_out = gr.Textbox(label="Prediction", interactive=False)
 
-        # Section évaluation
-        gr.Markdown("### Évaluez la prédiction")
+        gr.Markdown("### Évaluation humaine")
         with gr.Row():
-            valider_btn = gr.Button("Valider", variant="primary")
-            invalider_btn = gr.Button("Invalider", variant="stop")
-            eval_status = gr.State(value=None)  # (valider | invalider)
-        comment_box = gr.Textbox(label="Commentaire", placeholder="Votre retour…", lines=3)
-        save_btn = gr.Button("Enregistrer l'évaluation", variant="secondary")
+            valider = gr.Button("Valider", variant="primary")
+            invalider = gr.Button("Invalider", variant="stop")
+            eval_state = gr.State(value=None)
+        comment_box = gr.Textbox(label="Commentaire", lines=3)
+        save_btn = gr.Button("Enregistrer", variant="secondary")
         save_msg = gr.Markdown()
 
-        # -------------------------------------------------------------
-        # Callbacks
-        # -------------------------------------------------------------
-        def on_example_select(choice: str):
-            """Remplit la zone de texte avec message_clean et l'état courant."""
+        # Callback sélection d'exemple
+        def on_select(choice: str):
             if not choice:
                 return gr.update(), None, None
             row_id = int(choice.split(" – ")[0])
@@ -179,61 +173,43 @@ def build_interface() -> gr.Blocks:
             return gr.update(value=row.message_clean), row_id, row.prediction
 
         example_choice.change(
-            fn=on_example_select,
+            fn=on_select,
             inputs=example_choice,
-            outputs=[mail_input, selected_id, prediction_output],
+            outputs=[mail_input, selected_id, prediction_out],
         )
 
-        def classify_and_persist(text: str, row_id: int | None):
-            """Prédit et stocke dans la base si un row_id est fourni."""
+        # Classification + persistance
+        def on_classify(text: str, row_id: int | None):
             pred = classify(text)
-            if row_id is not None and pred != "<no model>":
+            if row_id is not None and not pred.startswith("<"):
                 save_prediction(row_id, pred)
             return pred
 
-        classify_btn.click(
-            fn=classify_and_persist,
-            inputs=[mail_input, selected_id],
-            outputs=prediction_output,
-        )
+        classify_btn.click(on_classify, inputs=[mail_input, selected_id], outputs=prediction_out)
 
-        valider_btn.click(lambda: "valider", None, eval_status)
-        invalider_btn.click(lambda: "invalider", None, eval_status)
+        valider.click(lambda: "valider", None, eval_state)
+        invalider.click(lambda: "invalider", None, eval_state)
 
-        def on_save(row_id: int | None, eval_status: str | None, comment: str):
+        def on_save(row_id: int | None, status: str | None, comment: str):
             if row_id is None:
-                return "❌ Aucun exemple sélectionné."
-            if eval_status not in {"valider", "invalider"}:
-                return "❌ Cliquez sur Valider ou Invalider avant d'enregistrer."
-            save_evaluation(row_id, eval_status, comment)
-            return "✅ Évaluation enregistrée !"
+                return "❌ Sélectionnez un mail d'abord."
+            if status not in {"valider", "invalider"}:
+                return "❌ Cliquez sur Valider/Invalider avant."
+            save_evaluation(row_id, status, comment)
+            return "✅ Évaluation enregistrée."
 
-        save_btn.click(
-            fn=on_save,
-            inputs=[selected_id, eval_status, comment_box],
-            outputs=save_msg,
-        )
+        save_btn.click(on_save, inputs=[selected_id, eval_state, comment_box], outputs=save_msg)
 
     return demo
 
 # ---------------------------------------------------------------------------
-# 5. Point d'entrée CLI
+# 5. Main
 # ---------------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser(description="Web‑app mail‑classification & évaluation")
-    parser.add_argument("--import", dest="import_file", type=Path, help="Fichier Excel à importer avant de démarrer l'app", required=False)
-    parser.add_argument("--db", dest="db", type=Path, default=DB_PATH, help="Chemin base SQLite (défaut: emails.db)")
-    args = parser.parse_args()
-
-    global DB_PATH
-    DB_PATH = args.db
-
-    if args.import_file:
-        import_excel_to_db(args.import_file, args.db)
-
+def main() -> None:
+    import_excel_once()  # fait la base si besoin
     ui = build_interface()
-    ui.launch(server_name="0.0.0.0", show_error=True)
+    ui.launch(server_name="0.0.0.0")
 
 
 if __name__ == "__main__":
