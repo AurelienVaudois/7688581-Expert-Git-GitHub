@@ -95,3 +95,10 @@ evaluation_button.then(
     inputs=[row_state, output_prediction_hidden, evaluation, comment],
     outputs=[]
 )
+
+#############EDIT##################
+
+# -- initialisation sans .update() -----------------------------
+init_choices = [f"{i} – {s}" for i, s in fetch_choices(0)]
+mail_selector.choices = init_choices        # <- on fixe directement l'attribut
+page_lbl.value = f"Page 1/{max_page+1}"     # <- idem pour le Markdown
