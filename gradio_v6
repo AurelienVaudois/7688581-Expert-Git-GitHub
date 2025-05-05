@@ -75,3 +75,26 @@ with sqlite3.connect(DB) as cnx:
     for col in ("prediction","validation","comment"):
         cnx.execute(f'ALTER TABLE emails_raw ADD COLUMN IF NOT EXISTS {col} TEXT')
 print("✅ Excel importé")
+
+
+import pandas as pd, sqlite3, sys, os, pathlib
+
+EXCEL = sys.argv[1] if len(sys.argv) > 1 else "mails.xlsx"
+DB    = "/mnt/data/mails_corpo/email_classification.db"   # même chemin que test.py
+
+# 1) import Excel → SQLite (écrase la table si elle existe)
+df = pd.read_excel(EXCEL)
+pathlib.Path(os.path.dirname(DB)).mkdir(parents=True, exist_ok=True)
+with sqlite3.connect(DB) as cnx:
+    df.to_sql("emails_raw", cnx, if_exists="replace", index=False)
+
+    # 2) ajouter les trois colonnes si besoin
+    def add_column_if_missing(table, column, col_type="TEXT"):
+        cols = [row[1] for row in cnx.execute(f"PRAGMA table_info({table})")]
+        if column not in cols:
+            cnx.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+    for col in ("prediction", "validation", "comment"):
+        add_column_if_missing("emails_raw", col)
+
+print("✅  Excel importé dans emails_raw + colonnes feedback")
