@@ -102,3 +102,31 @@ evaluation_button.then(
 init_choices = [f"{i} – {s}" for i, s in fetch_choices(0)]
 mail_selector.choices = init_choices        # <- on fixe directement l'attribut
 page_lbl.value = f"Page 1/{max_page+1}"     # <- idem pour le Markdown
+
+# ------------------------------------------------------------------
+# Helper pagination → retourne la liste de sujets à afficher
+# ------------------------------------------------------------------
+def fetch_choices(page: int = 0, page_size: int = PAGE_SIZE):
+    """
+    Récupère PAGE_SIZE lignes (subject + motif) de la table `emails`
+    pour la page demandée, et renvoie une liste de chaînes prêtes
+    pour le Dropdown : "rowid – subject – motif".
+    """
+    offset = page * page_size
+
+    query = """
+        SELECT
+            rowid,
+            subject,
+            [Motifs Collaborateurs (libellé en FR)] AS motif
+        FROM emails
+        LIMIT ? OFFSET ?
+    """
+
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(query, conn, params=(page_size, offset))
+
+    return [
+        f"{int(r.rowid)} – {r.subject} – {r.motif}"
+        for r in df.itertuples()
+    ]
