@@ -1,0 +1,77 @@
+import sqlite3, pandas as pd               # déjà présents plus bas, le double‑import ne gêne pas
+PAGE_SIZE = 100                            # taille d’un lot (pour remplir le menu)
+
+def load_subjects(offset:int = 0, batch:int = PAGE_SIZE):
+    """Renvoie un dict {label ➜ id} pour le dropdown."""
+    with sqlite3.connect(db_path) as cnx:  # db_path existe déjà dans test.py :contentReference[oaicite:0]{index=0}:contentReference[oaicite:1]{index=1}
+        q = f"""SELECT id, subject
+                 FROM emails_raw
+                 ORDER BY id
+                 LIMIT {batch} OFFSET {offset}"""
+        df = pd.read_sql(q, cnx)
+    return {f"{r.id} – {r.subject}": r.id for _, r in df.iterrows()}
+
+
+# ─── Onglet « Batch » ────────────────────────────────────────────────────────────
+with gr.Tab("📥  Batch Excel"):
+
+    offset_state = gr.State(0)          # pour naviguer par pas de 100
+    id_map_state = gr.State({})         # label -> id
+
+    with gr.Row():
+        prev_btn = gr.Button("⬅︎")
+        next_btn = gr.Button("➡︎")
+        page_md  = gr.Markdown()
+
+    subject_dd = gr.Dropdown(label="Sélectionnez un email", filterable=True)
+    body_tb    = gr.Textbox(lines=12, label="Contenu", interactive=False)
+
+    classify_btn  = gr.Button("🔍 Classifier", variant="primary")
+    pred_html     = gr.HTML()
+    eval_radio    = gr.Radio(["Valider", "Invalider"], label="Évaluation")
+    comment_tb    = gr.Textbox(label="Commentaire")
+    save_btn      = gr.Button("💾 Enregistrer")
+
+    # ------- Callbacks compacts -------------------------------------------------
+    def refresh(offset):
+        mapping = load_subjects(offset)
+        return (gr.Dropdown.update(choices=list(mapping), value=None),
+                mapping,
+                f"Lot {offset//PAGE_SIZE + 1}")
+
+    prev_btn.click(lambda o: max(o-PAGE_SIZE,0), offset_state, offset_state)\
+            .then(refresh, offset_state, [subject_dd, id_map_state, page_md])
+    next_btn.click(lambda o: o+PAGE_SIZE,      offset_state, offset_state)\
+            .then(refresh, offset_state, [subject_dd, id_map_state, page_md])
+
+    def show_body(label, id_map):
+        if not label: return gr.update(value="")
+        mail_id = id_map[label]
+        txt = pd.read_sql("SELECT message_clean FROM emails_raw WHERE id=?",
+                          sqlite3.connect(db_path), params=[mail_id]).iloc[0,0]
+        return gr.update(value=txt)
+    subject_dd.change(show_body, [subject_dd, id_map_state], body_tb)
+
+    def classify_selected(txt):
+        pred, cats, info, bg, icon = classify_email_placeholder(txt)  # fonction existante
+        return f"<div style='background:{bg};padding:10px'>{icon}&nbsp;{pred}</div>", pred
+    classify_btn.click(classify_selected, body_tb, [pred_html, gr.Textbox(visible=False)])
+
+    def save_eval(txt, pred, val, com):
+        save_to_db(txt, pred, val, com)                               # fonction existante
+        return "✅ Évaluation enregistrée"
+    save_btn.click(save_eval,
+                   [body_tb, pred_html, eval_radio, comment_tb],
+                   gr.Textbox(label="Status"))
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+import pandas as pd, sqlite3, sys
+EXCEL = sys.argv[1] if len(sys.argv)>1 else "mails.xlsx"
+DB    = "/mnt/data/mails_corpo/email_classification.db"   # même chemin que test.py
+df = pd.read_excel(EXCEL)
+with sqlite3.connect(DB) as cnx:
+    df.to_sql("emails_raw", cnx, if_exists="replace", index=False)
+    for col in ("prediction","validation","comment"):
+        cnx.execute(f'ALTER TABLE emails_raw ADD COLUMN IF NOT EXISTS {col} TEXT')
+print("✅ Excel importé")
