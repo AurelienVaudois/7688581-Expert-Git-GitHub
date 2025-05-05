@@ -1,0 +1,97 @@
+# ============================================================
+# 📄  AJOUT – connexion à la table `emails` + pagination (100)
+# ============================================================
+
+# --- 1. Vérifier / créer les colonnes dans la table `emails`
+with sqlite3.connect(db_path) as _conn:
+    _c = _conn.cursor()
+    for col in ("prediction", "eval_status", "eval_comment"):
+        try:
+            _c.execute(f"ALTER TABLE emails ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass                                     # colonne déjà là
+    _conn.commit()
+
+PAGE_SIZE   = 100                           # mails / page
+page_state  = gr.State(0)                   # page courante
+row_state   = gr.State(None)                # rowid mail choisi
+
+# --- 2. Navigation (Précédent / Suivant) + dropdown ----------
+with gr.Row():
+    prev_btn   = gr.Button("◀ Précédent")
+    page_lbl   = gr.Markdown()
+    next_btn   = gr.Button("Suivant ▶")
+
+mail_selector = gr.Dropdown(label="Mails (subject – motif)")
+
+def _choices(page: int):
+    """Retourne le gr.update pour le dropdown."""
+    off = page * PAGE_SIZE
+    query = """
+        SELECT rowid, subject,
+               [Motifs Collaborateurs (libellé en FR)] AS motif
+        FROM emails LIMIT ? OFFSET ?
+    """
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(query, conn, params=(PAGE_SIZE, off))
+    choices = [
+        f"{r.rowid} – {r.subject} – {r.motif}"
+        for r in df.itertuples()
+    ]
+    return gr.update(choices=choices, value=None)
+
+# total & max page
+with sqlite3.connect(db_path) as _c:
+    nb = _c.execute("SELECT COUNT(*) FROM emails").fetchone()[0]
+max_page = (nb - 1) // PAGE_SIZE
+
+# init
+mail_selector.update(**_choices(0))
+page_lbl.update(f"Page 1/{max_page+1}")
+
+# ⬅ / ➡ callbacks
+def _nav(cur: int, delta: int):
+    new = max(0, min(max_page, cur + delta))
+    return new, _choices(new), f"Page {new+1}/{max_page+1}"
+
+prev_btn.click(lambda cur: _nav(cur, -1),
+               inputs=[page_state],
+               outputs=[page_state, mail_selector, page_lbl])
+
+next_btn.click(lambda cur: _nav(cur, 1),
+               inputs=[page_state],
+               outputs=[page_state, mail_selector, page_lbl])
+
+# --- 3. Charger le mail sélectionné --------------------------
+def _load(choice: str):
+    if not choice:
+        return gr.update(), None
+    rid = int(choice.split(" – ")[0])
+    with sqlite3.connect(db_path) as conn:
+        body = pd.read_sql_query(
+            "SELECT message_clean FROM emails WHERE rowid = ?",
+            conn, params=(rid,)
+        ).iloc[0, 0]
+    return gr.update(value=body), rid
+
+mail_selector.change(_load,
+                     inputs=[mail_selector],
+                     outputs=[email_input, row_state])
+
+# --- 4. Après clic « Enregistrer l'évaluation » ---------------
+def _save_in_emails(rid, pred, eval_, comm):
+    if rid is None:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE emails SET prediction=?, eval_status=?, "
+            "eval_comment=? WHERE rowid=?",
+            (pred, eval_, comm, rid)
+        )
+        conn.commit()
+
+evaluation_button.then(
+    fn=_save_in_emails,
+    inputs=[row_state, output_prediction_hidden, evaluation, comment],
+    outputs=[]
+)
