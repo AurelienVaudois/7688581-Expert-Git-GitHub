@@ -1,0 +1,110 @@
+import pandas as pd
+from pathlib import Path
+from PIL import Image
+from pdf2image import convert_from_path, pdfinfo_from_path
+import base64, io, mimetypes, os
+
+# ------------------------------------------------------------
+# 1. Fonctions utilitaires
+# ------------------------------------------------------------
+
+def img_file_to_data_uri(path, fmt_fallback="PNG", jpg_quality=85, thumb_max_px=1024):
+    """
+    Convertit une image (png, jpg, …) en data URI Base64.
+    Redimensionne pour rester < 4 Mo si `thumb_max_px` est fixé.
+    """
+    path = Path(path)
+    mime = mimetypes.guess_type(path)[0] or f"image/{fmt_fallback.lower()}"
+    img = Image.open(path)
+
+    if thumb_max_px:
+        img.thumbnail((thumb_max_px, thumb_max_px))
+
+    buf = io.BytesIO()
+    save_fmt = "JPEG" if mime.endswith("jpeg") else "PNG"
+    save_kwargs = {"format": save_fmt}
+    if save_fmt == "JPEG":
+        save_kwargs["quality"] = jpg_quality
+    img.save(buf, **save_kwargs)
+
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+def pdf_to_data_uris(path, dpi=300, fmt="JPEG", jpg_quality=85, thumb_max_px=1024):
+    """
+    Convertit **toutes** les pages d’un PDF en liste de data URIs Base64 (une par page).
+    """
+    path = Path(path)
+    nb_pages = pdfinfo_from_path(path)["Pages"]
+    mime = f"image/{fmt.lower()}"
+    uris = []
+
+    for p in range(1, nb_pages + 1):
+        page = convert_from_path(path, dpi=dpi, fmt=fmt.lower(),
+                                 first_page=p, last_page=p)[0]
+        if thumb_max_px:
+            page.thumbnail((thumb_max_px, thumb_max_px))
+        buf = io.BytesIO()
+        page.save(buf, format=fmt, quality=jpg_quality if fmt == "JPEG" else None)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        uris.append(f"data:{mime};base64,{b64}")
+
+    return uris
+
+
+def attachment_to_data_uris(path):
+    """
+    Routeur : choisit la bonne fonction suivant l’extension.
+    Renvoie une **liste** :
+        • 0 élément  → type non géré
+        • 1 élément  → image unique encodée
+        • n éléments → n pages encodées pour un PDF
+    """
+    path = Path(path)
+    ext = path.suffix.lower()
+
+    if ext in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}:
+        return [img_file_to_data_uri(path)]
+    elif ext == ".pdf":
+        return pdf_to_data_uris(path)
+    else:
+        return []      # on ignore les autres formats
+
+
+# ------------------------------------------------------------
+# 2. Traitement d’un DataFrame
+# ------------------------------------------------------------
+
+def enrich_df_with_base64(df, pj_col="pj", new_col="pj_b64"):
+    """
+    Ajoute une colonne `new_col` contenant, pour chaque ligne,
+    la liste des data URIs encodées issues des pièces jointes.
+    """
+    def encode_row(pj_list):
+        out = []
+        for pj in pj_list or []:
+            out += attachment_to_data_uris(pj)
+        return out
+
+    df[new_col] = df[pj_col].apply(encode_row)
+    return df
+
+
+# ------------------------------------------------------------
+# 3. Exemple d’utilisation
+# ------------------------------------------------------------
+
+# Exemple fictif :
+df = pd.DataFrame(
+    {
+        "message_content": ["Bonjour, voici les docs", "Rapport mensuel"],
+        "pj": [
+            ["exemple.png", "annexe.pdf"],      # 1 image, 1 pdf multi-pages
+            ["photo.jpeg", "notes.docx"]        # docx sera ignoré
+        ],
+    }
+)
+
+df = enrich_df_with_base64(df)
+print(df[["message_content", "pj_b64"]])
