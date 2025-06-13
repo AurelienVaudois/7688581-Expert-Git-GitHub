@@ -1,0 +1,144 @@
+from openai import OpenAI
+import pandas as pd
+from functools import lru_cache
+
+# ------------------------------------------------------------------
+# 1) DataFrame d’exemple  (vous avez déjà le vôtre)
+# ------------------------------------------------------------------
+df = pd.DataFrame(
+    {
+        "message_content": ["Bonjour, analyse cette PJ"],
+        "pj": [["exemple.png", "annexe.pdf"]],    # ← noms de fichiers seulement
+    }
+)
+
+# ------------------------------------------------------------------
+# 2) Fonctions d’encodage déjà vues (résumé)
+# ------------------------------------------------------------------
+from pathlib import Path
+from PIL import Image
+from pdf2image import convert_from_path, pdfinfo_from_path
+import base64, io, mimetypes
+
+BASE_DIR = Path("/mnt/data/mails_corpo/get-documents")
+
+def _resolve(path):
+    p = Path(path)
+    return p if p.is_absolute() else BASE_DIR / p
+
+def img_file_to_data_uri(path, jpg_quality=85, max_px=1024):
+    path = _resolve(path)
+    mime = mimetypes.guess_type(path)[0] or "image/png"
+    img = Image.open(path)
+    img.thumbnail((max_px, max_px))
+    buf = io.BytesIO()
+    save_fmt = "JPEG" if mime.endswith("jpeg") else "PNG"
+    img.save(buf, format=save_fmt, quality=jpg_quality if save_fmt == "JPEG" else None)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+def pdf_to_data_uris(path, dpi=300, fmt="JPEG", jpg_quality=85, max_px=1024):
+    path = _resolve(path)
+    nb_pages = pdfinfo_from_path(path)["Pages"]
+    mime = f"image/{fmt.lower()}"
+    uris = []
+    for p in range(1, nb_pages + 1):
+        page = convert_from_path(path, dpi=dpi, fmt=fmt.lower(),
+                                 first_page=p, last_page=p)[0]
+        page.thumbnail((max_px, max_px))
+        buf = io.BytesIO()
+        page.save(buf, format=fmt, quality=jpg_quality if fmt == "JPEG" else None)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        uris.append(f"data:{mime};base64,{b64}")
+    return uris
+
+@lru_cache(maxsize=512)
+def attachment_to_data_uris(path):
+    p = _resolve(path)
+    ext = p.suffix.lower()
+    if ext in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}:
+        return tuple([img_file_to_data_uri(p)])
+    elif ext == ".pdf":
+        return tuple(pdf_to_data_uris(p))
+    else:
+        return tuple()       # type non géré
+
+# ------------------------------------------------------------------
+# 3) Construction du message pour **une** ligne
+# ------------------------------------------------------------------
+def build_messages(text, attachments):
+    blocks = [{"type": "text", "text": text}]
+    for pj in attachments:
+        for uri in attachment_to_data_uris(pj):
+            blocks.append({"type": "image_url", "image_url": {"url": uri}})
+            if len(blocks) - 1 == 20:             # 20 images max
+                break
+    return [{"role": "user", "content": blocks}]
+
+# ------------------------------------------------------------------
+# 4) Appel API pour la première ligne seulement
+# ------------------------------------------------------------------
+row = df.iloc[0]                     # ou df.loc[index] si vous avez un index
+messages = build_messages(row["message_content"], row["pj"])
+
+client = OpenAI()                    # suppose que OPENAI_API_KEY est dans l'env
+
+response = client.chat.completions.create(
+    model="gpt-4-vision-preview",
+    messages=messages,
+    max_tokens=300,                  # ajustez selon vos besoins
+)
+
+print(response.choices[0].message.content)
+
+
+
+EXTRA_PROMPT = """
+Tu es un assistant chargé d’extraire des informations précises dans des documents bancaires.
+Extrais les données suivantes :
+
+- Numéro de chèque
+- Montant du chèque
+- Date d’émission
+- Nom du bénéficiaire
+
+Réponds au format JSON strict, clés en snake_case.
+"""
+
+def build_messages(text, attachments, header=EXTRA_PROMPT.strip()):
+    """
+    Construit le message OpenAI :
+    • `header` = vos consignes (facultatif)
+    • `text`   = contenu brut du mail
+    • `attachments` = liste de noms de PJ
+
+    Retourne la liste `messages` à passer à l’API.
+    """
+    blocks = [
+        {
+            "type": "text",
+            "text": f"{header}\n\n--- COURRIEL ORIGINAL ---\n{text}"
+        }
+    ]
+
+    # Idem qu’avant : on ajoute chaque image encodée en Base-64
+    for pj in attachments:
+        for uri in attachment_to_data_uris(pj):
+            blocks.append({"type": "image_url", "image_url": {"url": uri}})
+            if len(blocks) - 1 == 20:          # 20 images max
+                break
+
+    return [{"role": "user", "content": blocks}]
+
+
+row = df.iloc[0]                                     # ou df.loc[index]
+messages = build_messages(row["message_content"], row["pj"])
+
+response = client.chat.completions.create(
+    model="gpt-4-vision-preview",
+    messages=messages,
+    max_tokens=300,
+)
+
+print(response.choices[0].message.content)
+
