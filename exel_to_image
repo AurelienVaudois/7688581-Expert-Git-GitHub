@@ -1,84 +1,134 @@
-import os
+Oui, c'est tout à fait possible de convertir chaque feuille d'un fichier Excel en image sous Linux avec Python. Voici plusieurs approches que vous pouvez utiliser :
+
+## Méthode 1 : Avec pandas + matplotlib (recommandée)
+
+```python
 import pandas as pd
-from pdf2image import convert_from_path
-import libreoffice_convert as libre_convert # Importe la bibliothèque
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+import numpy as np
 
-def convert_excel_sheet_to_image_linux(excel_path, output_folder="images_from_excel"):
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-
-    # Assurez-vous que le chemin vers votre fichier Excel est absolu
-    abs_excel_path = os.path.abspath(excel_path)
+def excel_to_images(excel_file, output_dir="output"):
+    # Lire toutes les feuilles
+    sheets = pd.read_excel(excel_file, sheet_name=None)
     
-    # Vérifier si LibreOffice est accessible
-    # libreoffice-convert utilise la commande 'soffice' ou 'libreoffice'
-    # Il est bon de s'assurer qu'il est dans le PATH
+    for sheet_name, df in sheets.items():
+        # Créer une figure
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.axis('tight')
+        ax.axis('off')
+        
+        # Créer un tableau
+        table = ax.table(cellText=df.values,
+                        colLabels=df.columns,
+                        cellLoc='center',
+                        loc='center')
+        
+        # Styliser le tableau
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.2, 1.5)
+        
+        # Sauvegarder
+        plt.savefig(f"{output_dir}/{sheet_name}.png", 
+                   bbox_inches='tight', dpi=300)
+        plt.close()
+
+# Utilisation
+excel_to_images("mon_fichier.xlsx")
+```
+
+## Méthode 2 : Avec openpyxl + PIL (pour plus de contrôle)
+
+```python
+from openpyxl import load_workbook
+from PIL import Image, ImageDraw, ImageFont
+import os
+
+def excel_sheet_to_image(sheet, output_path):
+    # Calculer les dimensions
+    max_row = sheet.max_row
+    max_col = sheet.max_column
+    
+    cell_width = 100
+    cell_height = 30
+    img_width = max_col * cell_width
+    img_height = max_row * cell_height
+    
+    # Créer l'image
+    img = Image.new('RGB', (img_width, img_height), 'white')
+    draw = ImageDraw.Draw(img)
+    
     try:
-        # Tente de convertir le fichier entier d'abord pour avoir un aperçu
-        # libreoffice-convert convertit tout le document en un seul PDF par défaut
-        temp_pdf_path = os.path.join(output_folder, "temp_full_excel.pdf")
-        libre_convert.convert(abs_excel_path, temp_pdf_path)
-        print(f"Fichier Excel entier converti temporairement en PDF: {temp_pdf_path}")
-
-    except Exception as e:
-        print(f"Erreur lors de la conversion de l'Excel en PDF via LibreOffice: {e}")
-        print("Assurez-vous que LibreOffice est installé et accessible via la commande 'soffice' ou 'libreoffice' dans votre PATH.")
-        return
-
-    # Utiliser pandas pour lister les noms de feuilles
-    try:
-        xls = pd.ExcelFile(abs_excel_path, engine='openpyxl')
-        sheet_names = xls.sheet_names
-        print(f"Feuilles détectées: {sheet_names}")
-    except Exception as e:
-        print(f"Erreur lors de la lecture des feuilles Excel avec pandas: {e}")
-        return
-
-    # Pour l'instant, libreoffice-convert ne permet pas de convertir une seule feuille facilement.
-    # L'approche la plus fiable est de convertir tout le classeur en un seul PDF,
-    # puis d'utiliser pdf2image pour extraire chaque page (qui correspondra souvent à une feuille)
-    # et de les renommer. Cela suppose que chaque feuille Excel correspond à une page PDF.
-
-    if not os.path.exists(temp_pdf_path):
-        print("Le fichier PDF temporaire n'a pas été créé. Impossible de continuer.")
-        return
-
-    try:
-        # Convertir le PDF entier en images
-        # Cette fonction va générer une image par page du PDF
-        print(f"Conversion du PDF temporaire en images...")
-        images = convert_from_path(temp_pdf_path, dpi=300) # Augmentez le DPI pour une meilleure qualité
-
-        for i, image in enumerate(images):
-            # Le nom de la feuille peut être approximatif si le nombre de pages PDF
-            # ne correspond pas exactement au nombre de feuilles (ex: une feuille large prend 2 pages)
-            # On utilise le nom de la feuille pour la première page de la feuille.
-            # Pour des cas plus complexes, il faudrait générer un PDF par feuille directement
-            # (ce qui est plus difficile avec libreoffice-convert)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+    except:
+        font = ImageFont.load_default()
+    
+    # Dessiner les cellules
+    for row in range(1, max_row + 1):
+        for col in range(1, max_col + 1):
+            cell = sheet.cell(row=row, column=col)
+            x = (col - 1) * cell_width
+            y = (row - 1) * cell_height
             
-            # Simple mapping (peut être inexact pour les feuilles multi-pages)
-            if i < len(sheet_names):
-                image_name = f"{sheet_names[i]}.png"
-            else:
-                image_name = f"sheet_page_{i+1}.png" # Fallback si plus de pages que de feuilles
+            # Dessiner le rectangle de la cellule
+            draw.rectangle([x, y, x + cell_width, y + cell_height], 
+                          outline='black', width=1)
             
-            output_image_path = os.path.join(output_folder, image_name)
-            image.save(output_image_path, "PNG")
-            print(f"  Page {i+1} exportée en: {output_image_path}")
+            # Ajouter le texte
+            if cell.value:
+                text = str(cell.value)
+                draw.text((x + 5, y + 5), text, font=font, fill='black')
+    
+    img.save(output_path)
 
-        os.remove(temp_pdf_path) # Supprimer le PDF temporaire
+def convert_excel_to_images(excel_file, output_dir="output"):
+    os.makedirs(output_dir, exist_ok=True)
+    wb = load_workbook(excel_file)
+    
+    for sheet_name in wb.sheetnames:
+        sheet = wb[sheet_name]
+        output_path = f"{output_dir}/{sheet_name}.png"
+        excel_sheet_to_image(sheet, output_path)
+        print(f"Feuille '{sheet_name}' convertie en {output_path}")
 
-    except Exception as e:
-        print(f"Erreur lors de la conversion du PDF en images: {e}")
-        print("Assurez-vous que Poppler (poppler-utils) est installé sur votre système.")
+# Utilisation
+convert_excel_to_images("mon_fichier.xlsx")
+```
 
-    print(f"\nConversion terminée. Les images se trouvent dans le dossier : {output_folder}")
+## Installation des dépendances
 
-# --- Comment l'utiliser ---
-# Remplacez "votre_fichier.xlsx" par le chemin réel de votre fichier Excel
-# et "mon_dossier_images" par le dossier où vous voulez enregistrer les images.
-# exemple_fichier_excel = "/chemin/vers/mon/fichier/data.xlsx"
-# dossier_de_sortie = "mes_images_excel_linux"
+```bash
+pip install pandas matplotlib openpyxl pillow
+```
 
-# convert_excel_sheet_to_image_linux(exemple_fichier_excel, dossier_de_sortie)
+## Méthode 3 : Avec dataframe-image (plus simple)
 
+```bash
+pip install dataframe-image
+```
+
+```python
+import pandas as pd
+import dataframe_image as dfi
+
+def excel_to_images_simple(excel_file, output_dir="output"):
+    sheets = pd.read_excel(excel_file, sheet_name=None)
+    
+    for sheet_name, df in sheets.items():
+        output_path = f"{output_dir}/{sheet_name}.png"
+        dfi.export(df, output_path)
+        print(f"Feuille '{sheet_name}' sauvegardée comme {output_path}")
+
+excel_to_images_simple("mon_fichier.xlsx")
+```
+
+## Conseils pratiques
+
+- La méthode 1 avec matplotlib est la plus flexible pour le styling
+- La méthode 2 avec PIL donne plus de contrôle sur le rendu pixel par pixel
+- La méthode 3 avec dataframe-image est la plus simple mais moins customisable
+- Ajustez les paramètres `figsize`, `dpi`, et `fontsize` selon vos besoins
+- Pour de gros fichiers Excel, considérez traiter les feuilles par chunks
+
+Quelle méthode préférez-vous tester en premier ?
