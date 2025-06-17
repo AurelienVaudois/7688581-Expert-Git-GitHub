@@ -1,57 +1,103 @@
-Oui, c'est tout à fait possible de convertir chaque feuille d'un fichier Excel en image sous Linux avec Python. Voici plusieurs approches que vous pouvez utiliser :
-
-## Méthode 1 : Avec pandas + matplotlib (recommandée)
-
-```python
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-import numpy as np
-
-def excel_to_images(excel_file, output_dir="output"):
-    # Lire toutes les feuilles
-    sheets = pd.read_excel(excel_file, sheet_name=None)
-    
-    for sheet_name, df in sheets.items():
-        # Créer une figure
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.axis('tight')
-        ax.axis('off')
-        
-        # Créer un tableau
-        table = ax.table(cellText=df.values,
-                        colLabels=df.columns,
-                        cellLoc='center',
-                        loc='center')
-        
-        # Styliser le tableau
-        table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1.2, 1.5)
-        
-        # Sauvegarder
-        plt.savefig(f"{output_dir}/{sheet_name}.png", 
-                   bbox_inches='tight', dpi=300)
-        plt.close()
-
-# Utilisation
-excel_to_images("mon_fichier.xlsx")
-```
-
-## Méthode 2 : Avec openpyxl + PIL (pour plus de contrôle)
-
-```python
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-def excel_sheet_to_image(sheet, output_path):
+def rgb_from_hex(hex_color):
+    """Convertit une couleur hex en RGB"""
+    if hex_color and hex_color.startswith('FF'):
+        hex_color = hex_color[2:]  # Enlever le préfixe alpha
+    if not hex_color or len(hex_color) != 6:
+        return (255, 255, 255)  # Blanc par défaut
+    try:
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    except:
+        return (255, 255, 255)
+
+def get_cell_style(cell):
+    """Extrait le style d'une cellule"""
+    style = {}
+    
+    # Couleur de fond
+    if cell.fill and cell.fill.start_color and cell.fill.start_color.rgb:
+        style['bg_color'] = rgb_from_hex(cell.fill.start_color.rgb)
+    else:
+        style['bg_color'] = (255, 255, 255)  # Blanc par défaut
+    
+    # Couleur du texte
+    if cell.font and cell.font.color and cell.font.color.rgb:
+        style['text_color'] = rgb_from_hex(cell.font.color.rgb)
+    else:
+        style['text_color'] = (0, 0, 0)  # Noir par défaut
+    
+    # Police
+    style['bold'] = cell.font.bold if cell.font and cell.font.bold else False
+    style['italic'] = cell.font.italic if cell.font and cell.font.italic else False
+    style['font_size'] = cell.font.size if cell.font and cell.font.size else 11
+    style['font_name'] = cell.font.name if cell.font and cell.font.name else 'Arial'
+    
+    # Bordures
+    style['border'] = {
+        'top': bool(cell.border.top.style) if cell.border and cell.border.top else False,
+        'bottom': bool(cell.border.bottom.style) if cell.border and cell.border.bottom else False,
+        'left': bool(cell.border.left.style) if cell.border and cell.border.left else False,
+        'right': bool(cell.border.right.style) if cell.border and cell.border.right else False,
+    }
+    
+    # Alignement
+    if cell.alignment:
+        style['h_align'] = cell.alignment.horizontal or 'general'
+        style['v_align'] = cell.alignment.vertical or 'bottom'
+    else:
+        style['h_align'] = 'general'
+        style['v_align'] = 'bottom'
+    
+    return style
+
+def get_font_path(font_name, bold=False, italic=False):
+    """Trouve le chemin vers une police système"""
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/",
+        "/usr/share/fonts/truetype/liberation/",
+        "/usr/share/fonts/TTF/",
+        "/System/Library/Fonts/",
+        "C:/Windows/Fonts/"
+    ]
+    
+    font_files = {
+        'Arial': {
+            (False, False): ['DejaVuSans.ttf', 'LiberationSans-Regular.ttf'],
+            (True, False): ['DejaVuSans-Bold.ttf', 'LiberationSans-Bold.ttf'],
+            (False, True): ['DejaVuSans-Oblique.ttf', 'LiberationSans-Italic.ttf'],
+            (True, True): ['DejaVuSans-BoldOblique.ttf', 'LiberationSans-BoldItalic.ttf']
+        }
+    }
+    
+    # Utiliser Arial par défaut
+    font_name = 'Arial'
+    possible_files = font_files[font_name].get((bold, italic), font_files[font_name][(False, False)])
+    
+    for path in font_paths:
+        for font_file in possible_files:
+            full_path = os.path.join(path, font_file)
+            if os.path.exists(full_path):
+                return full_path
+    
+    return None  # Utiliser la police par défaut
+
+def excel_sheet_to_image_formatted(sheet, output_path, cell_width=120, cell_height=25):
+    """Convertit une feuille Excel en image en conservant la mise en forme"""
+    
     # Calculer les dimensions
     max_row = sheet.max_row
     max_col = sheet.max_column
     
-    cell_width = 100
-    cell_height = 30
+    if max_row == 1 and max_col == 1 and not sheet.cell(1, 1).value:
+        print(f"Feuille vide, création d'une image par défaut")
+        img = Image.new('RGB', (200, 100), 'white')
+        img.save(output_path)
+        return
+    
     img_width = max_col * cell_width
     img_height = max_row * cell_height
     
@@ -59,76 +105,114 @@ def excel_sheet_to_image(sheet, output_path):
     img = Image.new('RGB', (img_width, img_height), 'white')
     draw = ImageDraw.Draw(img)
     
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-    except:
-        font = ImageFont.load_default()
-    
-    # Dessiner les cellules
+    # Traiter chaque cellule
     for row in range(1, max_row + 1):
         for col in range(1, max_col + 1):
             cell = sheet.cell(row=row, column=col)
+            style = get_cell_style(cell)
+            
             x = (col - 1) * cell_width
             y = (row - 1) * cell_height
             
-            # Dessiner le rectangle de la cellule
+            # Dessiner le fond de la cellule
             draw.rectangle([x, y, x + cell_width, y + cell_height], 
-                          outline='black', width=1)
+                          fill=style['bg_color'])
             
-            # Ajouter le texte
-            if cell.value:
+            # Dessiner les bordures
+            border_color = (0, 0, 0)  # Noir pour les bordures
+            if style['border']['top']:
+                draw.line([x, y, x + cell_width, y], fill=border_color, width=1)
+            if style['border']['bottom']:
+                draw.line([x, y + cell_height, x + cell_width, y + cell_height], 
+                         fill=border_color, width=1)
+            if style['border']['left']:
+                draw.line([x, y, x, y + cell_height], fill=border_color, width=1)
+            if style['border']['right']:
+                draw.line([x + cell_width, y, x + cell_width, y + cell_height], 
+                         fill=border_color, width=1)
+            
+            # Ajouter le texte si présent
+            if cell.value is not None:
                 text = str(cell.value)
-                draw.text((x + 5, y + 5), text, font=font, fill='black')
+                
+                # Charger la police
+                font_path = get_font_path(style['font_name'], style['bold'], style['italic'])
+                try:
+                    font = ImageFont.truetype(font_path, int(style['font_size'])) if font_path else ImageFont.load_default()
+                except:
+                    font = ImageFont.load_default()
+                
+                # Calculer la position du texte selon l'alignement
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                # Alignement horizontal
+                if style['h_align'] == 'center':
+                    text_x = x + (cell_width - text_width) // 2
+                elif style['h_align'] == 'right':
+                    text_x = x + cell_width - text_width - 5
+                else:  # left ou general
+                    text_x = x + 5
+                
+                # Alignement vertical
+                if style['v_align'] == 'center':
+                    text_y = y + (cell_height - text_height) // 2
+                elif style['v_align'] == 'top':
+                    text_y = y + 2
+                else:  # bottom
+                    text_y = y + cell_height - text_height - 2
+                
+                # Dessiner le texte
+                draw.text((text_x, text_y), text, font=font, fill=style['text_color'])
     
-    img.save(output_path)
+    # Sauvegarder l'image
+    img.save(output_path, 'PNG', dpi=(300, 300))
+    print(f"Image sauvegardée : {output_path}")
 
-def convert_excel_to_images(excel_file, output_dir="output"):
+def convert_excel_to_images_formatted(excel_file, output_dir="output_formatted", 
+                                    cell_width=120, cell_height=25):
+    """Convertit toutes les feuilles d'un Excel en images avec mise en forme"""
+    
+    if not os.path.exists(excel_file):
+        print(f"Erreur : Le fichier {excel_file} n'existe pas")
+        return
+    
+    # Créer le dossier de sortie
     os.makedirs(output_dir, exist_ok=True)
-    wb = load_workbook(excel_file)
     
-    for sheet_name in wb.sheetnames:
-        sheet = wb[sheet_name]
-        output_path = f"{output_dir}/{sheet_name}.png"
-        excel_sheet_to_image(sheet, output_path)
-        print(f"Feuille '{sheet_name}' convertie en {output_path}")
+    try:
+        # Charger le fichier Excel
+        wb = load_workbook(excel_file, data_only=False)  # data_only=False pour garder les formules
+        
+        print(f"Conversion du fichier : {excel_file}")
+        print(f"Nombre de feuilles : {len(wb.sheetnames)}")
+        
+        for i, sheet_name in enumerate(wb.sheetnames, 1):
+            print(f"\nTraitement de la feuille {i}/{len(wb.sheetnames)} : '{sheet_name}'")
+            
+            sheet = wb[sheet_name]
+            
+            # Nettoyer le nom pour le fichier
+            safe_name = "".join(c for c in sheet_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            output_path = os.path.join(output_dir, f"{safe_name}.png")
+            
+            excel_sheet_to_image_formatted(sheet, output_path, cell_width, cell_height)
+        
+        print(f"\n✅ Conversion terminée ! Images sauvegardées dans : {output_dir}")
+        
+    except Exception as e:
+        print(f"❌ Erreur lors de la conversion : {str(e)}")
 
-# Utilisation
-convert_excel_to_images("mon_fichier.xlsx")
-```
-
-## Installation des dépendances
-
-```bash
-pip install pandas matplotlib openpyxl pillow
-```
-
-## Méthode 3 : Avec dataframe-image (plus simple)
-
-```bash
-pip install dataframe-image
-```
-
-```python
-import pandas as pd
-import dataframe_image as dfi
-
-def excel_to_images_simple(excel_file, output_dir="output"):
-    sheets = pd.read_excel(excel_file, sheet_name=None)
+# Exemple d'utilisation
+if __name__ == "__main__":
+    # Remplacez par le chemin de votre fichier Excel
+    excel_file = "mon_fichier.xlsx"
     
-    for sheet_name, df in sheets.items():
-        output_path = f"{output_dir}/{sheet_name}.png"
-        dfi.export(df, output_path)
-        print(f"Feuille '{sheet_name}' sauvegardée comme {output_path}")
-
-excel_to_images_simple("mon_fichier.xlsx")
-```
-
-## Conseils pratiques
-
-- La méthode 1 avec matplotlib est la plus flexible pour le styling
-- La méthode 2 avec PIL donne plus de contrôle sur le rendu pixel par pixel
-- La méthode 3 avec dataframe-image est la plus simple mais moins customisable
-- Ajustez les paramètres `figsize`, `dpi`, et `fontsize` selon vos besoins
-- Pour de gros fichiers Excel, considérez traiter les feuilles par chunks
-
-Quelle méthode préférez-vous tester en premier ?
+    # Vous pouvez ajuster les dimensions des cellules selon vos besoins
+    convert_excel_to_images_formatted(
+        excel_file, 
+        output_dir="images_excel",
+        cell_width=100,  # Largeur des cellules en pixels
+        cell_height=30   # Hauteur des cellules en pixels
+    )
