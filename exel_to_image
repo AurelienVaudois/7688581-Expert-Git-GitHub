@@ -1,0 +1,68 @@
+import win32com.client as wc
+import os
+from PIL import Image
+from PyPDF2 import PdfReader # Pour compter les pages, ou pdf2image
+from pdf2image import convert_from_path # Pour convertir PDF en images
+
+def excel_sheet_to_image_windows(excel_path, output_folder="images_from_excel"):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    excel_app = wc.Dispatch("Excel.Application")
+    excel_app.Visible = False # Rendre Excel invisible
+    excel_app.DisplayAlerts = False # Désactiver les alertes
+
+    try:
+        workbook = excel_app.Workbooks.Open(os.path.abspath(excel_path))
+
+        for sheet in workbook.Sheets:
+            sheet_name = sheet.Name
+            pdf_path = os.path.join(output_folder, f"{sheet_name}.pdf")
+
+            # Exporter la feuille en PDF
+            # Le format xlTypePDF ne fait pas partie de win32com, mais sa valeur numérique est 0
+            # Il est plus sûr d'utiliser la constante numérique si la constante symbolique n'est pas trouvée
+            # ou d'utiliser la méthode PrintOut qui peut gérer le PDF Print Driver
+            
+            # Méthode 1: Utiliser ExportAsFixedFormat (plus direct si ça fonctionne)
+            try:
+                # 0 correspond à xlTypePDF
+                sheet.ExportAsFixedFormat(0, pdf_path)
+                print(f"Feuille '{sheet_name}' exportée en PDF: {pdf_path}")
+            except Exception as e:
+                print(f"Erreur lors de l'exportation PDF de la feuille '{sheet_name}': {e}")
+                print("Tentative avec l'imprimante PDF par défaut...")
+                # Méthode 2: Utiliser l'imprimante PDF par défaut (nécessite "Microsoft Print to PDF" ou similaire)
+                # Assurez-vous que "Microsoft Print to PDF" est votre imprimante par défaut ou spécifiez-la
+                # Cette méthode est plus complexe pour rediriger vers un nom de fichier spécifique
+                # Elle est souvent contournée par ExportAsFixedFormat
+
+            # Si le PDF a été créé, le convertir en image
+            if os.path.exists(pdf_path):
+                try:
+                    # convert_from_path renvoie une liste d'images (une par page du PDF)
+                    images = convert_from_path(pdf_path)
+                    for i, image in enumerate(images):
+                        image_path = os.path.join(output_folder, f"{sheet_name}_page{i+1}.png")
+                        image.save(image_path, "PNG")
+                        print(f"  Page {i+1} de '{sheet_name}' convertie en image: {image_path}")
+                    os.remove(pdf_path) # Supprimer le PDF temporaire
+                except Exception as e:
+                    print(f"Erreur lors de la conversion du PDF '{pdf_name}' en images: {e}")
+                    print("Assurez-vous que poppler est installé et son chemin est dans votre PATH.")
+
+    finally:
+        workbook.Close(False) # Fermer le classeur sans enregistrer
+        excel_app.Quit() # Fermer l'application Excel
+
+# --- Utilisation ---
+# Si vous êtes sous Windows, installez :
+# pip install pywin32
+# pip install pandas openpyxl PyPDF2 pdf2image
+# Pour pdf2image, vous aurez besoin de 'poppler' (bibliothèque C++).
+# Téléchargez les binaires Poppler pour Windows : http://blog.alivate.com.au/poppler-windows/
+# Puis ajoutez le chemin du dossier 'bin' de Poppler à votre variable d'environnement PATH.
+
+# Exemple d'utilisation :
+# excel_file = "votre_fichier.xlsx"
+# excel_sheet_to_image_windows(excel_file, "mes_images_excel")
