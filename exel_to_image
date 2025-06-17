@@ -1,79 +1,104 @@
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-def rgb_from_hex(color_obj):
-    """Convertit une couleur hex ou RGB en tuple RGB"""
-    # Si c'est déjà un objet RGB d'openpyxl
-    if hasattr(color_obj, 'rgb') and color_obj.rgb:
-        hex_color = color_obj.rgb
-    elif hasattr(color_obj, 'value') and color_obj.value:
-        hex_color = color_obj.value
-    elif isinstance(color_obj, str):
-        hex_color = color_obj
-    else:
-        return (255, 255, 255)  # Blanc par défaut
-    
-    # Traiter la chaîne hex
-    if isinstance(hex_color, str):
-        if hex_color.startswith('FF') and len(hex_color) == 8:
-            hex_color = hex_color[2:]  # Enlever le préfixe alpha
-        elif hex_color.startswith('#'):
-            hex_color = hex_color[1:]
+def safe_get_color(color_obj, default=(255, 255, 255)):
+    """Extrait une couleur de manière sécurisée"""
+    try:
+        if not color_obj:
+            return default
+            
+        # Différents cas possibles avec openpyxl
+        if hasattr(color_obj, 'rgb') and color_obj.rgb:
+            hex_val = str(color_obj.rgb)
+        elif hasattr(color_obj, 'value') and color_obj.value:
+            hex_val = str(color_obj.value)
+        elif hasattr(color_obj, 'index') and color_obj.index is not None:
+            # Couleur indexée, utiliser une couleur par défaut
+            return default
+        elif isinstance(color_obj, str):
+            hex_val = color_obj
+        else:
+            return default
         
-        if len(hex_color) != 6:
-            return (255, 255, 255)
+        # Nettoyer la valeur hex
+        hex_val = hex_val.upper().replace('#', '')
         
-        try:
-            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-        except ValueError:
-            return (255, 255, 255)
-    
-    return (255, 255, 255)
+        # Gérer les différentes longueurs
+        if len(hex_val) == 8 and hex_val.startswith('FF'):
+            hex_val = hex_val[2:]  # Retirer alpha
+        elif len(hex_val) == 8:
+            hex_val = hex_val[2:]  # Retirer alpha en général
+        
+        if len(hex_val) == 6:
+            return tuple(int(hex_val[i:i+2], 16) for i in (0, 2, 4))
+        else:
+            return default
+            
+    except:
+        return default
 
-def get_cell_style(cell):
-    """Extrait le style d'une cellule"""
+def get_cell_style_safe(cell):
+    """Extrait le style d'une cellule de manière sécurisée"""
     style = {}
     
-    # Couleur de fond
-    if cell.fill and cell.fill.start_color:
-        style['bg_color'] = rgb_from_hex(cell.fill.start_color)
-    else:
-        style['bg_color'] = (255, 255, 255)  # Blanc par défaut
+    # Couleur de fond - très défensif
+    try:
+        if cell.fill and hasattr(cell.fill, 'start_color') and cell.fill.start_color:
+            style['bg_color'] = safe_get_color(cell.fill.start_color, (255, 255, 255))
+        else:
+            style['bg_color'] = (255, 255, 255)
+    except:
+        style['bg_color'] = (255, 255, 255)
     
-    # Couleur du texte
-    if cell.font and cell.font.color:
-        style['text_color'] = rgb_from_hex(cell.font.color)
-    else:
-        style['text_color'] = (0, 0, 0)  # Noir par défaut
+    # Couleur du texte - très défensif
+    try:
+        if cell.font and hasattr(cell.font, 'color') and cell.font.color:
+            style['text_color'] = safe_get_color(cell.font.color, (0, 0, 0))
+        else:
+            style['text_color'] = (0, 0, 0)
+    except:
+        style['text_color'] = (0, 0, 0)
     
-    # Police
-    style['bold'] = cell.font.bold if cell.font and cell.font.bold else False
-    style['italic'] = cell.font.italic if cell.font and cell.font.italic else False
-    style['font_size'] = cell.font.size if cell.font and cell.font.size else 11
-    style['font_name'] = cell.font.name if cell.font and cell.font.name else 'Arial'
+    # Police - défensif
+    try:
+        style['bold'] = bool(cell.font.bold) if cell.font and cell.font.bold else False
+        style['italic'] = bool(cell.font.italic) if cell.font and cell.font.italic else False
+        style['font_size'] = int(cell.font.size) if cell.font and cell.font.size else 11
+        style['font_name'] = str(cell.font.name) if cell.font and cell.font.name else 'Arial'
+    except:
+        style['bold'] = False
+        style['italic'] = False
+        style['font_size'] = 11
+        style['font_name'] = 'Arial'
     
-    # Bordures
-    style['border'] = {
-        'top': bool(cell.border.top.style) if cell.border and cell.border.top else False,
-        'bottom': bool(cell.border.bottom.style) if cell.border and cell.border.bottom else False,
-        'left': bool(cell.border.left.style) if cell.border and cell.border.left else False,
-        'right': bool(cell.border.right.style) if cell.border and cell.border.right else False,
-    }
+    # Bordures - défensif
+    try:
+        style['border'] = {
+            'top': bool(cell.border.top.style) if cell.border and cell.border.top and cell.border.top.style else False,
+            'bottom': bool(cell.border.bottom.style) if cell.border and cell.border.bottom and cell.border.bottom.style else False,
+            'left': bool(cell.border.left.style) if cell.border and cell.border.left and cell.border.left.style else False,
+            'right': bool(cell.border.right.style) if cell.border and cell.border.right and cell.border.right.style else False,
+        }
+    except:
+        style['border'] = {'top': False, 'bottom': False, 'left': False, 'right': False}
     
-    # Alignement
-    if cell.alignment:
-        style['h_align'] = cell.alignment.horizontal or 'general'
-        style['v_align'] = cell.alignment.vertical or 'bottom'
-    else:
+    # Alignement - défensif
+    try:
+        if cell.alignment:
+            style['h_align'] = str(cell.alignment.horizontal) if cell.alignment.horizontal else 'general'
+            style['v_align'] = str(cell.alignment.vertical) if cell.alignment.vertical else 'bottom'
+        else:
+            style['h_align'] = 'general'
+            style['v_align'] = 'bottom'
+    except:
         style['h_align'] = 'general'
         style['v_align'] = 'bottom'
     
     return style
 
-def get_font_path(font_name, bold=False, italic=False):
-    """Trouve le chemin vers une police système"""
+def get_font_path_safe(font_name, bold=False, italic=False):
+    """Trouve le chemin vers une police système de manière sécurisée"""
     font_paths = [
         "/usr/share/fonts/truetype/dejavu/",
         "/usr/share/fonts/truetype/liberation/",
@@ -82,155 +107,203 @@ def get_font_path(font_name, bold=False, italic=False):
         "C:/Windows/Fonts/"
     ]
     
-    font_files = {
-        'Arial': {
-            (False, False): ['DejaVuSans.ttf', 'LiberationSans-Regular.ttf'],
-            (True, False): ['DejaVuSans-Bold.ttf', 'LiberationSans-Bold.ttf'],
-            (False, True): ['DejaVuSans-Oblique.ttf', 'LiberationSans-Italic.ttf'],
-            (True, True): ['DejaVuSans-BoldOblique.ttf', 'LiberationSans-BoldItalic.ttf']
-        }
+    # Mapping des polices disponibles sur Linux
+    font_mapping = {
+        'Arial': ['DejaVuSans.ttf', 'LiberationSans-Regular.ttf'],
+        'Arial Bold': ['DejaVuSans-Bold.ttf', 'LiberationSans-Bold.ttf'],
+        'Arial Italic': ['DejaVuSans-Oblique.ttf', 'LiberationSans-Italic.ttf'],
+        'Arial Bold Italic': ['DejaVuSans-BoldOblique.ttf', 'LiberationSans-BoldItalic.ttf']
     }
     
-    # Utiliser Arial par défaut
-    font_name = 'Arial'
-    possible_files = font_files[font_name].get((bold, italic), font_files[font_name][(False, False)])
+    # Construire la clé de police
+    font_key = 'Arial'
+    if bold and italic:
+        font_key += ' Bold Italic'
+    elif bold:
+        font_key += ' Bold'
+    elif italic:
+        font_key += ' Italic'
     
+    possible_files = font_mapping.get(font_key, font_mapping['Arial'])
+    
+    # Chercher la police
     for path in font_paths:
-        for font_file in possible_files:
-            full_path = os.path.join(path, font_file)
-            if os.path.exists(full_path):
-                return full_path
+        if os.path.exists(path):
+            for font_file in possible_files:
+                full_path = os.path.join(path, font_file)
+                if os.path.exists(full_path):
+                    return full_path
     
-    return None  # Utiliser la police par défaut
+    return None
 
-def excel_sheet_to_image_formatted(sheet, output_path, cell_width=120, cell_height=25):
-    """Convertit une feuille Excel en image en conservant la mise en forme"""
+def excel_sheet_to_image_safe(sheet, output_path, cell_width=120, cell_height=30):
+    """Convertit une feuille Excel en image de manière très sécurisée"""
     
-    # Calculer les dimensions
-    max_row = sheet.max_row
-    max_col = sheet.max_column
-    
-    if max_row == 1 and max_col == 1 and not sheet.cell(1, 1).value:
-        print(f"Feuille vide, création d'une image par défaut")
-        img = Image.new('RGB', (200, 100), 'white')
-        img.save(output_path)
-        return
-    
-    img_width = max_col * cell_width
-    img_height = max_row * cell_height
-    
-    # Créer l'image
-    img = Image.new('RGB', (img_width, img_height), 'white')
-    draw = ImageDraw.Draw(img)
-    
-    # Traiter chaque cellule
-    for row in range(1, max_row + 1):
-        for col in range(1, max_col + 1):
-            cell = sheet.cell(row=row, column=col)
-            style = get_cell_style(cell)
-            
-            x = (col - 1) * cell_width
-            y = (row - 1) * cell_height
-            
-            # Dessiner le fond de la cellule
-            draw.rectangle([x, y, x + cell_width, y + cell_height], 
-                          fill=style['bg_color'])
-            
-            # Dessiner les bordures
-            border_color = (0, 0, 0)  # Noir pour les bordures
-            if style['border']['top']:
-                draw.line([x, y, x + cell_width, y], fill=border_color, width=1)
-            if style['border']['bottom']:
-                draw.line([x, y + cell_height, x + cell_width, y + cell_height], 
-                         fill=border_color, width=1)
-            if style['border']['left']:
-                draw.line([x, y, x, y + cell_height], fill=border_color, width=1)
-            if style['border']['right']:
-                draw.line([x + cell_width, y, x + cell_width, y + cell_height], 
-                         fill=border_color, width=1)
-            
-            # Ajouter le texte si présent
-            if cell.value is not None:
-                text = str(cell.value)
-                
-                # Charger la police
-                font_path = get_font_path(style['font_name'], style['bold'], style['italic'])
+    try:
+        # Calculer les dimensions réelles avec contenu
+        max_row = 1
+        max_col = 1
+        
+        # Trouver la dernière cellule avec contenu
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.value is not None:
+                    max_row = max(max_row, cell.row)
+                    max_col = max(max_col, cell.column)
+        
+        # Si pas de contenu, créer une image vide
+        if max_row == 1 and max_col == 1:
+            cell_1_1 = sheet.cell(1, 1)
+            if cell_1_1.value is None:
+                print(f"Feuille vide, création d'une image par défaut")
+                img = Image.new('RGB', (300, 100), 'white')
+                draw = ImageDraw.Draw(img)
                 try:
-                    font = ImageFont.truetype(font_path, int(style['font_size'])) if font_path else ImageFont.load_default()
+                    font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16)
                 except:
                     font = ImageFont.load_default()
+                draw.text((10, 40), "Feuille vide", font=font, fill=(0, 0, 0))
+                img.save(output_path)
+                return
+        
+        # Créer l'image
+        img_width = max_col * cell_width
+        img_height = max_row * cell_height
+        img = Image.new('RGB', (img_width, img_height), 'white')
+        draw = ImageDraw.Draw(img)
+        
+        print(f"  Traitement de {max_row} lignes × {max_col} colonnes")
+        
+        # Traiter chaque cellule
+        for row in range(1, max_row + 1):
+            for col in range(1, max_col + 1):
+                try:
+                    cell = sheet.cell(row=row, column=col)
+                    style = get_cell_style_safe(cell)
+                    
+                    x = (col - 1) * cell_width
+                    y = (row - 1) * cell_height
+                    
+                    # Dessiner le fond
+                    draw.rectangle([x, y, x + cell_width, y + cell_height], 
+                                  fill=style['bg_color'])
+                    
+                    # Dessiner les bordures
+                    border_color = (128, 128, 128)  # Gris pour les bordures
+                    if style['border']['top']:
+                        draw.line([x, y, x + cell_width, y], fill=border_color, width=1)
+                    if style['border']['bottom']:
+                        draw.line([x, y + cell_height, x + cell_width, y + cell_height], 
+                                 fill=border_color, width=1)
+                    if style['border']['left']:
+                        draw.line([x, y, x, y + cell_height], fill=border_color, width=1)
+                    if style['border']['right']:
+                        draw.line([x + cell_width, y, x + cell_width, y + cell_height], 
+                                 fill=border_color, width=1)
+                    
+                    # Ajouter le texte
+                    if cell.value is not None:
+                        text = str(cell.value)
+                        if len(text) > 50:  # Limiter la longueur du texte
+                            text = text[:47] + "..."
+                        
+                        # Charger la police
+                        font_path = get_font_path_safe(style['font_name'], 
+                                                     style['bold'], style['italic'])
+                        try:
+                            if font_path:
+                                font_size = min(style['font_size'], 14)  # Limiter la taille
+                                font = ImageFont.truetype(font_path, font_size)
+                            else:
+                                font = ImageFont.load_default()
+                        except:
+                            font = ImageFont.load_default()
+                        
+                        # Position du texte (simple)
+                        text_x = x + 3
+                        text_y = y + 3
+                        
+                        # Vérifier que le texte ne déborde pas
+                        try:
+                            bbox = draw.textbbox((text_x, text_y), text, font=font)
+                            if bbox[2] - bbox[0] > cell_width - 6:
+                                # Texte trop long, le raccourcir
+                                while len(text) > 3 and bbox[2] - bbox[0] > cell_width - 6:
+                                    text = text[:-4] + "..."
+                                    bbox = draw.textbbox((text_x, text_y), text, font=font)
+                        except:
+                            pass
+                        
+                        # Dessiner le texte
+                        draw.text((text_x, text_y), text, 
+                                 font=font, fill=style['text_color'])
                 
-                # Calculer la position du texte selon l'alignement
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-                
-                # Alignement horizontal
-                if style['h_align'] == 'center':
-                    text_x = x + (cell_width - text_width) // 2
-                elif style['h_align'] == 'right':
-                    text_x = x + cell_width - text_width - 5
-                else:  # left ou general
-                    text_x = x + 5
-                
-                # Alignement vertical
-                if style['v_align'] == 'center':
-                    text_y = y + (cell_height - text_height) // 2
-                elif style['v_align'] == 'top':
-                    text_y = y + 2
-                else:  # bottom
-                    text_y = y + cell_height - text_height - 2
-                
-                # Dessiner le texte
-                draw.text((text_x, text_y), text, font=font, fill=style['text_color'])
-    
-    # Sauvegarder l'image
-    img.save(output_path, 'PNG', dpi=(300, 300))
-    print(f"Image sauvegardée : {output_path}")
+                except Exception as e:
+                    # En cas d'erreur sur une cellule, continuer avec les autres
+                    print(f"    Erreur cellule ({row},{col}): {str(e)[:50]}")
+                    continue
+        
+        # Sauvegarder
+        img.save(output_path, 'PNG')
+        print(f"  ✅ Image sauvegardée : {output_path}")
+        
+    except Exception as e:
+        print(f"  ❌ Erreur lors de la création de l'image : {str(e)}")
+        # Créer une image d'erreur
+        img = Image.new('RGB', (400, 100), 'white')
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 40), f"Erreur: {str(e)[:50]}", fill=(255, 0, 0))
+        img.save(output_path)
 
-def convert_excel_to_images_formatted(excel_file, output_dir="output_formatted", 
-                                    cell_width=120, cell_height=25):
-    """Convertit toutes les feuilles d'un Excel en images avec mise en forme"""
+def convert_excel_to_images_robust(excel_file, output_dir="output_robust", 
+                                 cell_width=120, cell_height=30):
+    """Version ultra-robuste de la conversion Excel vers images"""
     
     if not os.path.exists(excel_file):
-        print(f"Erreur : Le fichier {excel_file} n'existe pas")
+        print(f"❌ Erreur : Le fichier {excel_file} n'existe pas")
         return
     
     # Créer le dossier de sortie
     os.makedirs(output_dir, exist_ok=True)
     
     try:
-        # Charger le fichier Excel
-        wb = load_workbook(excel_file, data_only=False)  # data_only=False pour garder les formules
+        print(f"🔄 Chargement du fichier : {excel_file}")
+        wb = load_workbook(excel_file, data_only=True)  # data_only=True pour éviter les formules
         
-        print(f"Conversion du fichier : {excel_file}")
-        print(f"Nombre de feuilles : {len(wb.sheetnames)}")
+        print(f"📊 Nombre de feuilles trouvées : {len(wb.sheetnames)}")
         
         for i, sheet_name in enumerate(wb.sheetnames, 1):
-            print(f"\nTraitement de la feuille {i}/{len(wb.sheetnames)} : '{sheet_name}'")
+            print(f"\n📄 Feuille {i}/{len(wb.sheetnames)} : '{sheet_name}'")
             
-            sheet = wb[sheet_name]
-            
-            # Nettoyer le nom pour le fichier
-            safe_name = "".join(c for c in sheet_name if c.isalnum() or c in (' ', '-', '_')).strip()
-            output_path = os.path.join(output_dir, f"{safe_name}.png")
-            
-            excel_sheet_to_image_formatted(sheet, output_path, cell_width, cell_height)
+            try:
+                sheet = wb[sheet_name]
+                
+                # Nettoyer le nom pour le fichier
+                safe_name = "".join(c for c in sheet_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                if not safe_name:
+                    safe_name = f"feuille_{i}"
+                
+                output_path = os.path.join(output_dir, f"{safe_name}.png")
+                
+                excel_sheet_to_image_safe(sheet, output_path, cell_width, cell_height)
+                
+            except Exception as e:
+                print(f"  ❌ Erreur avec la feuille '{sheet_name}': {str(e)}")
+                continue
         
-        print(f"\n✅ Conversion terminée ! Images sauvegardées dans : {output_dir}")
+        print(f"\n🎉 Conversion terminée ! Images dans : {output_dir}")
         
     except Exception as e:
-        print(f"❌ Erreur lors de la conversion : {str(e)}")
+        print(f"❌ Erreur fatale : {str(e)}")
 
 # Exemple d'utilisation
 if __name__ == "__main__":
-    # Remplacez par le chemin de votre fichier Excel
-    excel_file = "mon_fichier.xlsx"
+    # Utilisation
+    excel_file = "/mnt/data/mails_corpo/pj_label_studio/GD000001r41x26400000t016_Document1.xlsx"
     
-    # Vous pouvez ajuster les dimensions des cellules selon vos besoins
-    convert_excel_to_images_formatted(
+    convert_excel_to_images_robust(
         excel_file, 
-        output_dir="images_excel",
-        cell_width=100,  # Largeur des cellules en pixels
-        cell_height=30   # Hauteur des cellules en pixels
+        output_dir="/mnt/code/explo",
+        cell_width=100,
+        cell_height=25
     )
