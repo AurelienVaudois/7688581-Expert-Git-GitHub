@@ -38,3 +38,10 @@ def xlsx_to_png(xlsx_path, dpi=200, out_dir=None):
         img_paths.append(img_file)
 
     return img_paths
+
+
+
+libreoffice --headless --convert-to pdf "/chemin/Nom du document.xlsx" --outdir /tmp
+echo $?
+ls -lh /tmp | grep "Nom du document"
+
