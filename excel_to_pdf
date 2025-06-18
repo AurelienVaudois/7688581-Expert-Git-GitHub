@@ -45,3 +45,41 @@ libreoffice --headless --convert-to pdf "/chemin/Nom du document.xlsx" --outdir 
 echo $?
 ls -lh /tmp | grep "Nom du document"
 
+
+import uno, os, pathlib, subprocess, tempfile
+from pdf2image import convert_from_path
+
+def export_with_headers(xlsx):
+    # Connexion à LibreOffice déjà lancé en mode « service »
+    local_ctx = uno.getComponentContext()
+    resolver = local_ctx.ServiceManager.createInstanceWithContext(
+        "com.sun.star.bridge.UnoUrlResolver", local_ctx)
+    ctx = resolver.resolve(
+        "uno:socket,host=localhost,port=2002;urp;StarOffice.ComponentContext")
+    smgr = ctx.ServiceManager
+    desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+
+    url = pathlib.Path(xlsx).resolve().as_uri()
+    doc = desktop.loadComponentFromURL(url, "_blank", 0, ())
+
+    # 1) Afficher lettres A-B-C et numéros 1-2-3
+    families = doc.getStyleFamilies()
+    page_styles = families.getByName("PageStyles")
+    default = page_styles.getByName("Default")
+    default.setPropertyValue("PrintRowAndColumnHeaders", True)
+
+    # 2) Répéter la 1ʳᵉ ligne sur chaque page
+    sheet = doc.Sheets[0]
+    sheet.PrintTitleRows = "$1:$1"
+
+    # 3) Export PDF
+    pdf_path = pathlib.Path(tempfile.mkstemp(suffix=".pdf")[1])
+    filter_data = (uno.createUnoStruct("com.sun.star.beans.PropertyValue"),
+                   )
+    doc.storeToURL(pdf_path.as_uri(), filter_data)
+    doc.close(True)
+
+    # 4) PDF → PNG
+    return convert_from_path(pdf_path, dpi=200, fmt="png")
+
+
