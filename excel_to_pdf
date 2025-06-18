@@ -1,0 +1,40 @@
+import subprocess
+import tempfile
+import pathlib
+from pdf2image import convert_from_path
+
+def xlsx_to_png(xlsx_path, dpi=200, out_dir=None):
+    """
+    Convertit un classeur Excel en (une ou plusieurs) images PNG.
+    Renvoie la liste des chemins PNG générés.
+    """
+    xlsx_path = pathlib.Path(xlsx_path).resolve()
+    if out_dir is None:
+        out_dir = pathlib.Path(tempfile.mkdtemp())
+    else:
+        out_dir = pathlib.Path(out_dir).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) Excel → PDF avec LibreOffice
+    subprocess.run(
+        [
+            "libreoffice",
+            "--headless",
+            "--calc",                       # force le moteur Calc
+            "--convert-to", "pdf",
+            str(xlsx_path),
+            "--outdir", str(out_dir)
+        ],
+        check=True,
+    )
+    pdf_path = out_dir / f"{xlsx_path.stem}.pdf"
+
+    # 2) PDF → PNG avec pdf2image
+    pages = convert_from_path(pdf_path, dpi=dpi, fmt="png")
+    img_paths = []
+    for i, page in enumerate(pages, 1):
+        img_file = out_dir / f"{xlsx_path.stem}_p{i}.png"
+        page.save(img_file, "PNG")
+        img_paths.append(img_file)
+
+    return img_paths
