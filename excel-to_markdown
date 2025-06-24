@@ -1,0 +1,122 @@
+import openpyxl
+from openpyxl.worksheet.worksheet import Worksheet
+
+def convert_excel_sheet_to_markdown(sheet: Worksheet) -> str:
+    """
+    Convertit une feuille de calcul Excel en une table Markdown
+    en conservant le gras, l'italique et les hyperliens.
+
+    Args:
+        sheet: L'objet feuille de calcul de openpyxl.
+
+    Returns:
+        Une chaîne de caractères contenant la table au format Markdown.
+    """
+    md_table = []
+    header_processed = False
+
+    for row_idx, row in enumerate(sheet.iter_rows()):
+        row_cells = []
+        for cell in row:
+            content = str(cell.value) if cell.value is not None else ""
+
+            # 1. Gérer le gras et l'italique
+            is_bold = cell.font.b
+            is_italic = cell.font.i
+            
+            if is_bold and is_italic:
+                content = f"***{content}***"
+            elif is_bold:
+                content = f"**{content}**"
+            elif is_italic:
+                content = f"*{content}*"
+
+            # 2. Gérer les hyperliens
+            if cell.hyperlink:
+                content = f"[{content}]({cell.hyperlink.target})"
+
+            # Remplacer les pipes pour ne pas casser la table Markdown
+            content = content.replace("|", "\\|")
+            
+            row_cells.append(content)
+
+        # Construire la ligne de la table Markdown
+        md_table.append("| " + " | ".join(row_cells) + " |")
+
+        # Ajouter la ligne de séparation de l'en-tête
+        if not header_processed:
+            header_separator = ["---"] * len(row_cells)
+            md_table.insert(row_idx + 1, "| " + " | ".join(header_separator) + " |")
+            header_processed = True
+            
+    return "\n".join(md_table)
+
+# --- Exemple d'utilisation ---
+if __name__ == "__main__":
+    # Remplacez par le chemin de votre fichier Excel
+    excel_file_path = "votre_fichier.xlsx" 
+    # Remplacez par le nom de la feuille que vous voulez convertir
+    sheet_name = "Feuil1" 
+
+    try:
+        # Charger le classeur et la feuille
+        workbook = openpyxl.load_workbook(excel_file_path)
+        sheet = workbook[sheet_name]
+
+        # Lancer la conversion
+        markdown_output = convert_excel_sheet_to_markdown(sheet)
+
+        # Afficher le résultat
+        print(markdown_output)
+
+        # Optionnel : sauvegarder dans un fichier .md
+        with open("sortie.md", "w", encoding="utf-8") as f:
+            f.write(markdown_output)
+        print("\nTable Markdown sauvegardée dans sortie.md")
+
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier '{excel_file_path}' n'a pas été trouvé.")
+    except KeyError:
+        print(f"Erreur : La feuille '{sheet_name}' n'existe pas dans le fichier.")
+
+
+
+
+
+---
+
+
+import pandas as pd
+
+def convert_excel_to_markdown_simple(file_path: str, sheet_name: str) -> str:
+    """
+    Convertit une feuille Excel en table Markdown en utilisant pandas.
+    Rapide et simple, mais ne conserve aucune mise en forme.
+
+    Args:
+        file_path: Chemin vers le fichier Excel.
+        sheet_name: Nom de la feuille à convertir.
+
+    Returns:
+        Une chaîne de caractères contenant la table au format Markdown.
+    """
+    # Lire la feuille Excel dans un DataFrame
+    df = pd.read_excel(file_path, sheet_name=sheet_name)
+    
+    # Convertir le DataFrame en Markdown
+    # L'argument `index=False` empêche d'écrire l'index du DataFrame dans la sortie
+    return df.to_markdown(index=False)
+
+# --- Exemple d'utilisation ---
+if __name__ == "__main__":
+    excel_file_path = "votre_fichier.xlsx"
+    sheet_name = "Feuil1"
+
+    try:
+        markdown_table = convert_excel_to_markdown_simple(excel_file_path, sheet_name)
+        print(markdown_table)
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier '{excel_file_path}' n'a pas été trouvé.")
+    except Exception as e:
+        print(f"Une erreur est survenue : {e}")
+
