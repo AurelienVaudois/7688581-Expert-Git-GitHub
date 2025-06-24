@@ -120,3 +120,109 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Une erreur est survenue : {e}")
 
+
+
+#########
+
+
+import openpyxl
+from openpyxl.worksheet.worksheet import Worksheet
+
+def convert_excel_sheet_to_aligned_markdown(sheet: Worksheet) -> str:
+    """
+    Convertit une feuille de calcul Excel en une table Markdown parfaitement alignée,
+    en conservant le gras, l'italique et les hyperliens.
+    """
+    processed_data = []
+    column_widths = []
+
+    # --- PASSE 1: Lire les données, les traiter et calculer la largeur des colonnes ---
+    for row in sheet.iter_rows():
+        processed_row = []
+        for i, cell in enumerate(row):
+            # Traitement du contenu de la cellule (identique à la version précédente)
+            content = str(cell.value) if cell.value is not None else ""
+
+            is_bold = cell.font.b
+            is_italic = cell.font.i
+            
+            if is_bold and is_italic:
+                content = f"***{content}***"
+            elif is_bold:
+                content = f"**{content}**"
+            elif is_italic:
+                content = f"*{content}*"
+
+            if cell.hyperlink:
+                content = f"[{content}]({cell.hyperlink.target})"
+
+            content = content.replace("|", "\\|")
+            processed_row.append(content)
+
+            # Mettre à jour la largeur maximale pour cette colonne
+            if len(column_widths) <= i:
+                column_widths.append(0)
+            
+            # La largeur de la ligne de séparation (---) doit être d'au moins 3
+            width = max(len(content), 3)
+            if width > column_widths[i]:
+                column_widths[i] = width
+
+        processed_data.append(processed_row)
+
+    # --- PASSE 2: Construire la table Markdown alignée ---
+    md_table_lines = []
+
+    if not processed_data:
+        return ""
+
+    # 1. Ligne d'en-tête
+    header_cells = [
+        cell.ljust(width) for cell, width in zip(processed_data[0], column_widths)
+    ]
+    md_table_lines.append("| " + " | ".join(header_cells) + " |")
+
+    # 2. Ligne de séparation
+    separator_cells = [
+        '-' * width for width in column_widths
+    ]
+    md_table_lines.append("| " + " | ".join(separator_cells) + " |")
+
+    # 3. Lignes de données
+    for row in processed_data[1:]:
+        data_cells = [
+            cell.ljust(width) for cell, width in zip(row, column_widths)
+        ]
+        # S'assurer que la ligne a le bon nombre de colonnes
+        while len(data_cells) < len(column_widths):
+            data_cells.append(' '.ljust(column_widths[len(data_cells)]))
+            
+        md_table_lines.append("| " + " | ".join(data_cells) + " |")
+
+    return "\n".join(md_table_lines)
+
+
+# --- Exemple d'utilisation ---
+if __name__ == "__main__":
+    excel_file_path = "votre_fichier.xlsx"
+    sheet_name = "Feuil1" 
+
+    try:
+        workbook = openpyxl.load_workbook(excel_file_path)
+        sheet = workbook[sheet_name]
+
+        # Utiliser la nouvelle fonction améliorée
+        markdown_output = convert_excel_sheet_to_aligned_markdown(sheet)
+
+        print("--- Résultat Markdown avec alignement ---")
+        print(markdown_output)
+
+        with open("sortie_alignee.md", "w", encoding="utf-8") as f:
+            f.write(markdown_output)
+        print("\nTable Markdown alignée sauvegardée dans sortie_alignee.md")
+
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier '{excel_file_path}' n'a pas été trouvé.")
+    except KeyError:
+        print(f"Erreur : La feuille '{sheet_name}' n'existe pas dans le fichier.")
+
