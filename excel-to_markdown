@@ -226,3 +226,195 @@ if __name__ == "__main__":
     except KeyError:
         print(f"Erreur : La feuille '{sheet_name}' n'existe pas dans le fichier.")
 
+
+### xlrd ####
+
+import xlrd # Importation de la nouvelle bibliothèque
+
+def convert_xls_sheet_to_aligned_markdown(sheet: xlrd.sheet.Sheet, book: xlrd.book.Book) -> str:
+    """
+    Convertit une feuille de calcul .xls en table Markdown parfaitement alignée,
+    en utilisant la bibliothèque xlrd.
+    """
+    processed_data = []
+    column_widths = []
+    
+    # Dictionnaire pour trouver les hyperliens facilement
+    hyperlink_map = {h.get_coords(): h.url_str for h in sheet.hyperlink_list}
+
+    # --- PASSE 1: Lire les données, les traiter et calculer la largeur des colonnes ---
+    for row_idx in range(sheet.nrows):
+        processed_row = []
+        for col_idx in range(sheet.ncols):
+            cell = sheet.cell(row_idx, col_idx)
+            content = str(cell.value) if cell.value is not None else ""
+
+            # Récupérer les informations de formatage (la partie la plus complexe)
+            xf = book.xf_list[cell.xf_index]
+            font = book.font_list[xf.font_index]
+
+            is_bold = font.bold
+            is_italic = font.italic
+            
+            if is_bold and is_italic:
+                content = f"***{content}***"
+            elif is_bold:
+                content = f"**{content}**"
+            elif is_italic:
+                content = f"*{content}*"
+            
+            # Gérer les hyperliens
+            if (row_idx, col_idx) in hyperlink_map:
+                content = f"[{content}]({hyperlink_map[(row_idx, col_idx)]})"
+
+            content = content.replace("|", "\\|")
+            processed_row.append(content)
+
+            # Mettre à jour la largeur maximale pour cette colonne
+            if len(column_widths) <= col_idx:
+                column_widths.append(0)
+            
+            width = max(len(content), 3)
+            if width > column_widths[col_idx]:
+                column_widths[col_idx] = width
+
+        processed_data.append(processed_row)
+
+    # --- PASSE 2: Construire la table (identique à la version openpyxl) ---
+    # (Le code pour cette partie est le même, nous le mettons dans la fonction principale)
+    # ...
+    return build_markdown_table(processed_data, column_widths)
+
+## xlsx et xlrd ###
+
+
+import os
+import openpyxl
+import xlrd
+
+# --- Fonction pour les fichiers .XLSX (basée sur openpyxl) ---
+def convert_xlsx_sheet_to_markdown(sheet: openpyxl.worksheet.worksheet.Worksheet):
+    processed_data = []
+    column_widths = []
+
+    for row in sheet.iter_rows():
+        processed_row = []
+        for i, cell in enumerate(row):
+            content = str(cell.value) if cell.value is not None else ""
+            is_bold = cell.font.b
+            is_italic = cell.font.i
+            
+            if is_bold and is_italic: content = f"***{content}***"
+            elif is_bold: content = f"**{content}**"
+            elif is_italic: content = f"*{content}*"
+
+            if cell.hyperlink: content = f"[{content}]({cell.hyperlink.target})"
+            content = content.replace("|", "\\|")
+            processed_row.append(content)
+
+            if len(column_widths) <= i: column_widths.append(0)
+            width = max(len(content), 3)
+            if width > column_widths[i]: column_widths[i] = width
+        processed_data.append(processed_row)
+    
+    return build_markdown_table(processed_data, column_widths)
+
+# --- Fonction pour les fichiers .XLS (basée sur xlrd) ---
+def convert_xls_sheet_to_markdown(sheet: xlrd.sheet.Sheet, book: xlrd.book.Book):
+    processed_data = []
+    column_widths = []
+    hyperlink_map = {h.get_coords(): h.url_str for h in sheet.hyperlink_list}
+
+    for row_idx in range(sheet.nrows):
+        processed_row = []
+        for col_idx in range(sheet.ncols):
+            cell = sheet.cell(row_idx, col_idx)
+            content = str(cell.value) if cell.value is not None else ""
+
+            xf = book.xf_list[cell.xf_index]
+            font = book.font_list[xf.font_index]
+            is_bold, is_italic = font.bold, font.italic
+
+            if is_bold and is_italic: content = f"***{content}***"
+            elif is_bold: content = f"**{content}**"
+            elif is_italic: content = f"*{content}*"
+            
+            if (row_idx, col_idx) in hyperlink_map:
+                content = f"[{content}]({hyperlink_map[(row_idx, col_idx)]})"
+
+            content = content.replace("|", "\\|")
+            processed_row.append(content)
+            
+            if len(column_widths) <= col_idx: column_widths.append(0)
+            width = max(len(content), 3)
+            if width > column_widths[col_idx]: column_widths[col_idx] = width
+        processed_data.append(processed_row)
+        
+    return build_markdown_table(processed_data, column_widths)
+
+# --- Fonction utilitaire pour construire la table finale ---
+def build_markdown_table(processed_data, column_widths):
+    """Construit la chaîne de caractères Markdown à partir des données traitées et des largeurs."""
+    if not processed_data: return ""
+    md_lines = []
+    
+    header_cells = [cell.ljust(width) for cell, width in zip(processed_data[0], column_widths)]
+    md_lines.append("| " + " | ".join(header_cells) + " |")
+    
+    separator_cells = ['-' * width for width in column_widths]
+    md_lines.append("| " + " | ".join(separator_cells) + " |")
+
+    for row in processed_data[1:]:
+        data_cells = [cell.ljust(width) for cell, width in zip(row, column_widths)]
+        while len(data_cells) < len(column_widths):
+            data_cells.append(' '.ljust(column_widths[len(data_cells)]))
+        md_lines.append("| " + " | ".join(data_cells) + " |")
+        
+    return "\n".join(md_lines)
+
+# --- POINT D'ENTRÉE PRINCIPAL ---
+def convert_excel_to_markdown(file_path: str, sheet_name: str) -> str:
+    """
+    Détecte le format du fichier Excel et appelle la fonction de conversion appropriée.
+    """
+    # Récupère l'extension du fichier
+    _, extension = os.path.splitext(file_path)
+
+    if extension.lower() == '.xlsx':
+        print("Format .xlsx détecté, utilisation de openpyxl...")
+        workbook = openpyxl.load_workbook(file_path)
+        sheet = workbook[sheet_name]
+        return convert_xlsx_sheet_to_markdown(sheet)
+    
+    elif extension.lower() == '.xls':
+        print("Format .xls détecté, utilisation de xlrd...")
+        # L'option formatting_info=True est CRUCIALE
+        workbook = xlrd.open_workbook(file_path, formatting_info=True)
+        sheet = workbook.sheet_by_name(sheet_name)
+        return convert_xls_sheet_to_markdown(sheet, workbook)
+    
+    else:
+        raise ValueError(f"Format de fichier non supporté : '{extension}'. Utilisez .xls ou .xlsx.")
+
+
+# --- Exemple d'utilisation ---
+if __name__ == "__main__":
+    # MODIFIEZ CES VALEURS POUR TESTER
+    # Testez avec un .xls puis avec un .xlsx !
+    # excel_file_path = "mon_vieux_fichier.xls"
+    excel_file_path = "votre_fichier.xlsx" # Ou "votre_vieux_fichier.xls"
+    sheet_name_to_convert = "Feuil1"
+
+    try:
+        markdown_output = convert_excel_to_markdown(excel_file_path, sheet_name_to_convert)
+        print("\n--- Résultat Markdown ---")
+        print(markdown_output)
+
+        output_filename = os.path.splitext(os.path.basename(excel_file_path))[0] + ".md"
+        with open(output_filename, "w", encoding="utf-8") as f:
+            f.write(markdown_output)
+        print(f"\nTable Markdown sauvegardée dans {output_filename}")
+
+    except Exception as e:
+        print(f"\nUne erreur est survenue : {e}")
+
