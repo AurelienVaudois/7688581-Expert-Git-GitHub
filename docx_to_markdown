@@ -1,0 +1,121 @@
+import os
+import sys
+import pypandoc
+import subprocess
+import tempfile
+import shutil
+
+# --- FONCTION PRINCIPALE DE CONVERSION WORD -> MARKDOWN ---
+def convert_word_to_markdown(file_path: str, output_folder: str):
+    """
+    Convertit un fichier Word (.doc ou .docx) en Markdown,
+    en extrayant les images dans un sous-dossier 'media'.
+    """
+    # Valider le chemin d'entrée
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Le fichier '{file_path}' n'existe pas.")
+
+    # Créer le dossier de sortie s'il n'existe pas
+    os.makedirs(output_folder, exist_ok=True)
+
+    filename_without_ext = os.path.splitext(os.path.basename(file_path))[0]
+    docx_path = file_path
+    temp_dir = None # Pour gérer les fichiers temporaires
+
+    # --- Étape 1: Gérer les .doc en les convertissant en .docx ---
+    if file_path.lower().endswith('.doc'):
+        print(f"Format .doc détecté. Tentative de conversion vers .docx...")
+        
+        # Créer un dossier temporaire pour le .docx intermédiaire
+        temp_dir = tempfile.mkdtemp()
+        new_docx_path = os.path.join(temp_dir, filename_without_ext + ".docx")
+
+        if sys.platform == "win32":
+            # Méthode Windows avec MS Word
+            try:
+                import win32com.client as win32
+                word = win32.Dispatch("Word.Application")
+                word.visible = False
+                doc = word.Documents.Open(os.path.abspath(file_path))
+                # 16 correspond au format wdFormatXMLDocument (.docx)
+                doc.SaveAs2(os.path.abspath(new_docx_path), FileFormat=16)
+                doc.Close()
+                word.Quit()
+                docx_path = new_docx_path
+                print("Conversion .doc -> .docx réussie avec MS Word.")
+            except Exception as e:
+                print(f"Erreur avec la conversion via MS Word: {e}")
+                print("Assurez-vous que MS Word est installé et que pywin32 l'est aussi.")
+                if temp_dir: shutil.rmtree(temp_dir)
+                return
+        else:
+            # Méthode Linux/macOS avec LibreOffice/unoconv
+            try:
+                print("Tentative de conversion avec LibreOffice/unoconv...")
+                subprocess.run(
+                    ['unoconv', '-f', 'docx', '-o', new_docx_path, file_path],
+                    check=True
+                )
+                docx_path = new_docx_path
+                print("Conversion .doc -> .docx réussie avec LibreOffice.")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Erreur: 'unoconv' a échoué ou n'est pas installé.")
+                print("Veuillez installer LibreOffice et unoconv.")
+                if temp_dir: shutil.rmtree(temp_dir)
+                return
+
+    # --- Étape 2: Conversion du .docx en Markdown avec Pandoc ---
+    print(f"Conversion de '{os.path.basename(docx_path)}' en Markdown...")
+    
+    # Définir les chemins de sortie
+    output_md_path = os.path.join(output_folder, filename_without_ext + ".md")
+    media_folder = os.path.join(output_folder, 'media') # Dossier pour les images
+
+    # Arguments pour Pandoc : extraire les images dans le dossier 'media'
+    extra_args = [
+        '--extract-media', media_folder
+    ]
+
+    try:
+        pypandoc.convert_file(
+            source_file=docx_path,
+            to='gfm',  # GitHub Flavored Markdown, bon choix par défaut
+            outputfile=output_md_path,
+            extra_args=extra_args
+        )
+        print("-" * 50)
+        print("Conversion réussie !")
+        print(f"Fichier Markdown sauvegardé ici : {output_md_path}")
+        print(f"Images extraites ici : {media_folder}")
+        print("-" * 50)
+
+    except Exception as e:
+        print(f"Une erreur est survenue lors de la conversion Pandoc : {e}")
+        print("Assurez-vous que Pandoc est bien installé et accessible dans le PATH de votre système.")
+
+    finally:
+        # Nettoyer le .docx temporaire s'il a été créé
+        if temp_dir:
+            shutil.rmtree(temp_dir)
+            print("Dossier temporaire nettoyé.")
+
+
+# --- EXEMPLE D'UTILISATION ---
+if __name__ == '__main__':
+    # --- À MODIFIER ---
+    # Mettez ici le chemin vers votre fichier .doc ou .docx
+    word_file_to_convert = "mon_document.docx"
+    # Mettez ici le nom du dossier où seront sauvegardés le .md et les images
+    output_directory = "output_markdown"
+    # --- FIN DES MODIFICATIONS ---
+
+    # Vérification de la présence de Pandoc au début
+    try:
+        pypandoc.get_pandoc_version()
+        print(f"Pandoc version {pypandoc.get_pandoc_version()} trouvé.")
+        convert_word_to_markdown(word_file_to_convert, output_directory)
+    except OSError:
+        print("ERREUR CRITIQUE: Pandoc n'a pas été trouvé.")
+        print("Veuillez l'installer et vous assurer qu'il est dans le PATH de votre système.")
+        print("Instructions d'installation : https://pandoc.org/installing.html")
+
