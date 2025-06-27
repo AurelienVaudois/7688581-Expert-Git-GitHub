@@ -1,0 +1,105 @@
+import cv2
+import numpy as np
+
+# 0. Charger et convertir en gris
+img = cv2.imread("cheques.jpg")
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+# 1. Débruitage doux (bilateral: nettoie sans gommer le texte)
+gray = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
+
+# 2. Détection des contours pour isoler chaque chèque
+edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+cheque_imgs = []
+for cnt in contours:
+    area = cv2.contourArea(cnt)
+    if area < 30_000:     # ignore petites taches
+        continue
+    peri  = cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+
+    if len(approx) == 4:  # quadrilatère ≈ chèque
+        pts = approx.reshape(4, 2)
+        # 3. Perspective : « four-point transform »
+        # --> fonction utilitaire open-source ci-dessous
+        cheque = four_point_transform(img, pts)
+        cheque_imgs.append(cheque)
+
+# 4. Post-traitement pour chaque chèque individuel
+cleaned = []
+for im in cheque_imgs:
+    g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+
+    # a. Deskew : angle dominant via Hough
+    angle = cv2.minAreaRect(cv2.findNonZero(g))[2]
+    if angle < -45: angle += 90
+    (h, w) = g.shape
+    M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
+    g = cv2.warpAffine(g, M, (w, h), flags=cv2.INTER_CUBIC,
+                       borderMode=cv2.BORDER_REPLICATE)
+
+    # b. Contraste local (CLAHE)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    g = clahe.apply(g)
+
+    # c. Affûtage doux
+    sharp = cv2.GaussianBlur(g, (0,0), 3)
+    g = cv2.addWeighted(g, 1.5, sharp, -0.5, 0)
+
+    # d. Binarisation adaptative
+    bin_ = cv2.adaptiveThreshold(
+            g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 31, 7)
+
+    cleaned.append(bin_)
+    cv2.imwrite(f"cheque_{len(cleaned)}.png", bin_)  # PNG sans perte
+
+######################################################################
+
+def order_points(pts):
+    rect = np.zeros((4,2), dtype="float32")
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]
+    rect[2] = pts[np.argmax(s)]
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]
+    rect[3] = pts[np.argmax(diff)]
+    return rect
+
+def four_point_transform(image, pts):
+    rect = order_points(pts)
+    (tl, tr, br, bl) = rect
+    widthA = np.linalg.norm(br - bl)
+    widthB = np.linalg.norm(tr - tl)
+    maxW = int(max(widthA, widthB))
+
+    heightA = np.linalg.norm(tr - br)
+    heightB = np.linalg.norm(tl - bl)
+    maxH = int(max(heightA, heightB))
+
+    dst = np.array([[0, 0],
+                    [maxW - 1, 0],
+                    [maxW - 1, maxH - 1],
+                    [0, maxH - 1]], dtype="float32")
+    M = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(image, M, (maxW, maxH))
+    return warped
+
+############################################################
+
+import base64, requests
+
+def to_base64(path):
+    return base64.b64encode(open(path, "rb").read()).decode()
+
+for i in range(len(cleaned)):
+    b64 = to_base64(f"cheque_{i+1}.png")
+    resp = client.ocr.process(
+        model="mistral-ocr-latest",
+        document={"type": "image_url",
+                  "image_url": f"data:image/png;base64,{b64}"},
+        include_image_base64=False    # pas utile, vous l’avez déjà
+    )
+    print(resp.pages[0].markdown)
