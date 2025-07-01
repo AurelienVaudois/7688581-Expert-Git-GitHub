@@ -1,0 +1,101 @@
+import os
+import docx # pip install python-docx
+from docx.document import Document
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+
+def docx_to_markdown_pure_python(file_path: str, output_folder: str):
+    """
+    Tente de convertir un .docx en Markdown en utilisant uniquement des bibliothèques Python.
+    Ne fonctionne PAS pour les .doc.
+    """
+    if not file_path.lower().endswith('.docx'):
+        print("Ce script ne supporte que les fichiers .docx.")
+        return
+
+    # Créer les dossiers de sortie
+    os.makedirs(output_folder, exist_ok=True)
+    media_folder = os.path.join(output_folder, 'media')
+    os.makedirs(media_folder, exist_ok=True)
+
+    doc = docx.Document(file_path)
+    md_lines = []
+    image_counter = 1
+
+    # Dictionnaire pour mapper les images extraites à leur nom de fichier
+    image_map = {}
+
+    # Extraire toutes les images d'abord
+    for rel_id, rel in doc.part.rels.items():
+        if "image" in rel.target_ref:
+            image_data = rel.target_part.blob
+            image_ext = rel.target_part.content_type.split('/')[-1]
+            image_filename = f"image{image_counter}.{image_ext}"
+            
+            with open(os.path.join(media_folder, image_filename), "wb") as f:
+                f.write(image_data)
+            
+            image_map[rel_id] = image_filename
+            image_counter += 1
+
+    # Parcourir les éléments du corps du document (paragraphes et tableaux)
+    for block in doc.element.body:
+        if isinstance(block, docx.oxml.text.paragraph.CT_P):
+            p = Paragraph(block, doc)
+            
+            # Gérer les images dans les paragraphes
+            # C'est une heuristique simple, la réalité est plus complexe
+            inline_images = p.element.xpath('.//pic:pic')
+            if inline_images:
+                for pic in inline_images:
+                    rel_id = pic.xpath('.//a:blip/@r:embed')[0]
+                    if rel_id in image_map:
+                        image_filename = image_map[rel_id]
+                        md_lines.append(f"![{image_filename}](media/{image_filename})\n")
+            
+            # Gérer le style (titres)
+            line = ""
+            if p.style.name.startswith('Heading 1'):
+                line += "# "
+            elif p.style.name.startswith('Heading 2'):
+                line += "## "
+            elif p.style.name.startswith('Heading 3'):
+                line += "### "
+            
+            # Gérer le formatage (gras, italique)
+            for run in p.runs:
+                text = run.text
+                if run.bold:
+                    text = f"**{text}**"
+                if run.italic:
+                    text = f"*{text}*"
+                line += text
+            
+            md_lines.append(line)
+
+        elif isinstance(block, docx.oxml.table.CT_Tbl):
+            table = Table(block, doc)
+            # Gérer les tableaux
+            header = [" " + cell.text.strip() + " " for cell in table.rows[0].cells]
+            md_lines.append("|" + "|".join(header) + "|")
+            
+            separator = ["-" * (len(h)) for h in header]
+            md_lines.append("|" + "|".join(separator) + "|")
+            
+            for row in table.rows[1:]:
+                row_data = [" " + cell.text.strip() + " " for cell in row.cells]
+                md_lines.append("|" + "|".join(row_data) + "|")
+            
+            md_lines.append("") # Ligne vide après un tableau
+
+    # Sauvegarder le fichier Markdown
+    output_md_path = os.path.join(output_folder, os.path.basename(file_path).replace('.docx', '.md'))
+    with open(output_md_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(md_lines))
+    
+    print(f"Conversion (simplifiée) terminée. Fichier sauvegardé : {output_md_path}")
+
+
+# --- EXEMPLE D'UTILISATION ---
+if __name__ == '__main__':
+    docx_to_markdown_pure_python("mon_document.docx", "output_pure_python")
