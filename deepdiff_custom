@@ -1,11 +1,15 @@
-from deepdiff import DeepDiff, BaseOperator
+from deepdiff import DeepDiff
+from deepdiff.operator import BaseOperator
 
 class DateStrIgnoreSpacesOperator(BaseOperator):
     def match(self, level):
-        return level.t1 and level.t2 and 'date' in level.path(output_format='list')
+        return (
+            isinstance(level.t1, str)
+            and isinstance(level.t2, str)
+            and 'date' in level.path(output_format='list')
+        )
 
-    def give_up_diffing(self, level):
-        # Supprime les espaces et compare les chaînes
+    def give_up_diffing(self, level, **kwargs):
         val1 = level.t1.replace(' ', '')
         val2 = level.t2.replace(' ', '')
         return val1 == val2
@@ -14,4 +18,4 @@ data1 = {"date": "21/12/2022"}
 data2 = {"date": "21 / 12 / 2022"}
 
 diff = DeepDiff(data1, data2, custom_operators=[DateStrIgnoreSpacesOperator()])
-print(diff)  # devrait être vide
+print(diff)  # {}
