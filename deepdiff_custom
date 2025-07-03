@@ -52,3 +52,19 @@ json2 = {
 
 diff = DeepDiff(json1, json2, custom_operators=[DateStrIgnoreSpacesOperator()])
 print(diff)  # devrait être {}
+
+--------
+
+from deepdiff import DeepDiff
+from deepdiff.operator import BaseOperator
+
+class CaseInsensitiveStrOperator(BaseOperator):
+    def match(self, level):
+        # Appliquer uniquement sur des chaînes de caractères
+        return isinstance(level.t1, str) and isinstance(level.t2, str)
+
+    def give_up_diffing(self, level, **kwargs):
+        # Supprimer les espaces, convertir en minuscules, puis comparer
+        val1 = level.t1.replace(' ', '').lower()
+        val2 = level.t2.replace(' ', '').lower()
+        return val1 == val2
