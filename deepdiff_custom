@@ -19,3 +19,36 @@ data2 = {"date": "21 / 12 / 2022"}
 
 diff = DeepDiff(data1, data2, custom_operators=[DateStrIgnoreSpacesOperator()])
 print(diff)  # {}
+
+------
+
+from deepdiff import DeepDiff
+from deepdiff.operator import BaseOperator
+
+class DateStrIgnoreSpacesOperator(BaseOperator):
+    def match(self, level):
+        # Appliquer uniquement sur des chaînes
+        return isinstance(level.t1, str) and isinstance(level.t2, str)
+
+    def give_up_diffing(self, level, **kwargs):
+        # Normalisation simple des chaînes : suppression des espaces
+        val1 = level.t1.replace(' ', '')
+        val2 = level.t2.replace(' ', '')
+        return val1 == val2
+
+json1 = {
+    "users": [
+        {"id": 1, "profile": {"birthdate": "01/01/2000"}},
+        {"id": 2, "profile": {"birthdate": "02/02/2002"}}
+    ]
+}
+
+json2 = {
+    "users": [
+        {"id": 1, "profile": {"birthdate": "01 / 01 / 2000"}},
+        {"id": 2, "profile": {"birthdate": "02/02/2002"}}
+    ]
+}
+
+diff = DeepDiff(json1, json2, custom_operators=[DateStrIgnoreSpacesOperator()])
+print(diff)  # devrait être {}
