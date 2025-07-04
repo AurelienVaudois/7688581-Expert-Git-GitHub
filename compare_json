@@ -1,0 +1,110 @@
+from __future__ import annotations
+import json, re, collections
+from decimal import Decimal
+from datetime import datetime, date
+from pathlib import Path
+from typing import Any, Hashable
+
+# 1) --- helpers de normalisation --------------------------------------------
+
+_date_rx = re.compile(r"(\d{1,2})\s*[/\-\.]\s*(\d{1,2})\s*[/\-\.]\s*(\d{2,4})$")
+
+def _normalize_scalar(x: Any) -> Any:
+    """Minuscule + suppression espaces pour str ; cast Decimal + dates."""
+    if isinstance(x, str):
+        s = x.strip().lower()
+        # nombre ?
+        num = s.replace(" ", "").replace(" ", "")
+        if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", num):
+            return Decimal(num)
+        # date jj/mm/aaaa ?
+        m = _date_rx.match(s.replace(" ", ""))
+        if m:
+            d, m_, y = map(int, m.groups())
+            if y < 100:  # 2 chiffres -> 20xx
+                y += 2000
+            return date(y, m_, d)
+        return s
+    # déjà numérique ?
+    if isinstance(x, (int, float, Decimal)):
+        return Decimal(str(x))
+    return x
+
+def normalize(obj: Any) -> Any:
+    """Descente récursive avec normalisation."""
+    if isinstance(obj, dict):
+        return {k: normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize(i) for i in obj]
+    return _normalize_scalar(obj)
+
+# 2) --- comparaison de listes sans ordre -------------------------------------
+
+def as_bag(lst: list[dict], key_fields: tuple[str, ...]) -> collections.Counter:
+    """Transforme une liste de dict en multiset (Counter) clé -> dict."""
+    bag: collections.Counter = collections.Counter()
+    for d in lst:
+        key = tuple(d.get(f) for f in key_fields)
+        if any(k is None for k in key):
+            raise ValueError(f"Clé incomplète dans {d} (clé={key_fields})")
+        bag[(key, json.dumps(d, sort_keys=True, default=str))] += 1
+    return bag
+
+def compare_lists(gt: list[dict], pred: list[dict], key_fields: tuple[str, ...], what=""):
+    bag_gt = as_bag(gt, key_fields)
+    bag_pred = as_bag(pred, key_fields)
+    if bag_gt == bag_pred:
+        print(f"✅ {what or 'Liste'} : OK (mêmes éléments, ordre ignoré)")
+    else:
+        missing = bag_gt - bag_pred
+        extra   = bag_pred - bag_gt
+        if missing:
+            print(f"❌ {what} – éléments manquants :")
+            for (k, dump), n in missing.items():
+                print(f"   {k} (×{n}) — {dump}")
+        if extra:
+            print(f"❌ {what} – éléments en trop :")
+            for (k, dump), n in extra.items():
+                print(f"   {k} (×{n}) — {dump}")
+
+# 3) --- pipeline -------------------------------------------------------------
+
+def deep_compare(gt: dict, pred: dict) -> None:
+    """Compare deux JSON selon les règles spéciales."""
+    gt_norm   = normalize(gt)
+    pred_norm = normalize(pred)
+
+    # (a) comparer les blocs simples
+    for field in ("information_client",):
+        if gt_norm.get(field) != pred_norm.get(field):
+            print(f"❌ Diff dans {field} :")
+            print(" GT  :", gt_norm.get(field))
+            print(" Pred:", pred_norm.get(field))
+        else:
+            print(f"✅ {field} : OK")
+
+    # (b) comparer les listes où l'ordre n'a pas d'importance
+    compare_lists(
+        gt_norm.get("cheques", []),
+        pred_norm.get("cheques", []),
+        key_fields=("numero_cheque",),
+        what="Cheques",
+    )
+    compare_lists(
+        gt_norm.get("information_remises", []),
+        pred_norm.get("information_remises", []),
+        key_fields=("numero_bordereau",),
+        what="Remises",
+    )
+
+    # (c) vérifier qu'il n'existe pas d'autres champs non gérés
+    rest_gt   = {k: v for k, v in gt_norm.items() if k not in {"information_client", "cheques", "information_remises"}}
+    rest_pred = {k: v for k, v in pred_norm.items() if k not in {"information_client", "cheques", "information_remises"}}
+    if rest_gt != rest_pred:
+        print("⚠️  Autres champs divergents :", rest_gt, rest_pred)
+
+# ----------------------------------------------------------------------------- 
+if __name__ == "__main__":
+    gt    = json.loads(Path("groundtruth.json").read_text(encoding="utf-8"))
+    pred  = json.loads(Path("prediction.json").read_text(encoding="utf-8"))
+    deep_compare(gt[0], pred[0])  # ← vos fichiers contiennent des listes racine
