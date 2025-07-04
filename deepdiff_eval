@@ -104,3 +104,77 @@ pred = json.loads(Path("prediction.json").read_text())[0]
 result = score(ref, pred)
 print(f"✔️  {result['ok']} / {result['total']}  →  {result['percentage']:.2f} %")
 print("   Détail :", result['detail'])
+
+
+##################################################################
+
+
+from pathlib import Path
+import json, re
+from decimal import Decimal
+from datetime import datetime, date
+from typing import Any, Dict, Tuple
+
+# ---------- 1) normalisation ----------
+date_rx = re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})")
+
+def fix_scalar(x: Any) -> Any:
+    if isinstance(x, str):
+        s = x.strip()
+        # nombre → Decimal
+        if re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", s.replace(" ", "")):
+            return Decimal(s.replace(" ", "").replace(",", "."))
+        # date jj/mm/aa → datetime.date
+        m = date_rx.fullmatch(s)
+        if m:
+            d, m_, y = map(int, m.groups())
+            if y < 100:   # 2 chiffres → 21 → 2021
+                y += 2000
+            return date(y, m_, d)
+        return s.lower()  # chaînes insensible à la casse
+    return x
+
+def normalize(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize(v) for v in obj]
+    return fix_scalar(obj)
+
+# ---------- 2) flatten ----------
+def flatten(obj: Any, prefix: str = "") -> Dict[str, Any]:
+    """Renvoie {chemin : valeur (scalaire)}"""
+    out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.update(flatten(v, f"{prefix}.{k}" if prefix else k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out.update(flatten(v, f"{prefix}[{i}]"))
+    else:                          # scalaire
+        out[prefix] = obj
+    return out
+
+# ---------- 3) charge & calcule ----------
+gt   = json.loads(Path("groundtruth.json").read_text())
+pred = json.loads(Path("prediction.json").read_text())
+
+flat_gt   = flatten(normalize(gt))
+flat_pred = flatten(normalize(pred))
+
+expected_keys = set(flat_gt)
+pred_keys     = set(flat_pred)
+common_keys   = expected_keys & pred_keys
+
+correct = sum(1 for k in common_keys if flat_gt[k] == flat_pred[k])
+extra   = len(pred_keys - expected_keys)
+score   = correct - extra
+total   = len(expected_keys)
+
+# ---------- 4) rapport ----------
+print(f"Champs attendus   : {total}")
+print(f"Corrects          : {correct}")
+print(f"Faux / manquants  : {total - correct}")
+print(f"Clés parasites    : {extra}")
+print(f"Score final       : {score} / {total}  ({score/total:.3%})")
+
