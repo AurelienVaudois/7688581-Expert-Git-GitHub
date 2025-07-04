@@ -76,3 +76,96 @@ diff = DeepDiff(
     ignore_string_case=True
 )
 
+##################################################"""
+
+from __future__ import annotations
+import json, re, collections
+from decimal import Decimal
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, Hashable
+
+# --------------------------------------------------------------------------
+# 1) NORMALISATION ---------------------------------------------------------
+# --------------------------------------------------------------------------
+_date_rx = re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})$")
+
+def _norm_scalar(x: Any) -> Any:
+    """Chaîne → minuscules + spaces off, nombre → Decimal, date → datetime.date."""
+    if isinstance(x, str):
+        s = x.strip().lower()
+        # nombre ?  ex: "10 523,50" ou "-1234.5"
+        num = s.replace(" ", "")
+        if re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", num):
+            return Decimal(num.replace(",", "."))
+        # date ? ex: "17/08/2023"
+        m = _date_rx.match(num)
+        if m:
+            d, m_, y = map(int, m.groups())
+            if y < 100:
+                y += 2000               # "23" → 2023
+            return date(y, m_, d)
+        return s                        # chaîne « normale »
+    if isinstance(x, (int, float, Decimal)):
+        return Decimal(str(x))
+    return x                            # bool, None, etc.
+
+def normalize(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize(v) for v in obj]
+    return _norm_scalar(obj)
+
+# --------------------------------------------------------------------------
+# 2) FLATTEN (chemin → valeur) ---------------------------------------------
+# --------------------------------------------------------------------------
+def _freeze_list(lst: list[Any]) -> list[Any]:
+    """Ordre‐indépendant : on trie les éléments pour avoir un chemin stable."""
+    # pour des dicts → tri par leur représentation JSON (plus simple)
+    # pour des scalaires → tri naturel
+    return sorted(lst, key=lambda v: json.dumps(v, sort_keys=True, default=str))
+
+def flatten(obj: Any, prefix: str = "") -> dict[str, Any]:
+    """
+    Exemple de clé produite :
+    - "cheques[0].numero_cheque"  (l'index est pseudo-stable grâce au tri)
+    - "information_client.numero_compte"
+    """
+    flat: dict[str, Any] = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            flat.update(flatten(v, f"{prefix}{k}." if prefix else f"{k}."))
+    elif isinstance(obj, list):
+        for idx, item in enumerate(_freeze_list(obj)):
+            flat.update(flatten(item, f"{prefix}[{idx}]."))
+    else:                               # scalaire
+        flat[prefix.rstrip(".")] = obj
+    return flat
+
+# --------------------------------------------------------------------------
+# 3) SCORING ---------------------------------------------------------------
+# --------------------------------------------------------------------------
+def score_json(ref: dict, pred: dict) -> tuple[int, int, float]:
+    ref_n, pred_n = normalize(ref), normalize(pred)
+    flat_ref, flat_pred = flatten(ref_n), flatten(pred_n)
+
+    matches = sum(
+        1 for k, v in flat_ref.items()
+        if k in flat_pred and flat_pred[k] == v
+    )
+    total = len(flat_ref)              # seules les clés de la référence comptent
+    pct   = 100.0 * matches / total if total else 100.0
+    return matches, total, pct
+
+# --------------------------------------------------------------------------
+# 4) EXEMPLE D’UTILISATION -------------------------------------------------
+# --------------------------------------------------------------------------
+if __name__ == "__main__":
+    # admettons groundtruth.json et prediction.json dans le même dossier
+    gt   = json.loads(Path("groundtruth.json").read_text(encoding="utf-8"))[0]
+    pred = json.loads(Path("prediction.json").read_text(encoding="utf-8"))[0]
+
+    good, total, percent = score_json(gt, pred)
+    print(f"✔️  Bonnes valeurs : {good} / {total}  →  {percent:.2f} %")
+
