@@ -1,0 +1,106 @@
+import re, json
+from decimal import Decimal
+from datetime import date, datetime
+
+rx_date = re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})")
+
+def norm_scalar(x):
+    "minuscules, espaces retirés, nombres → Decimal, dates → date"
+    if isinstance(x, str):
+        s = x.strip().lower()
+        # nombre (gère espaces & virgule)
+        num = s.replace(" ", "")
+        if re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", num):
+            return Decimal(num.replace(",", "."))
+        # date jj/mm/aaaa
+        m = rx_date.fullmatch(num)
+        if m:
+            d, m_, y = map(int, m.groups())
+            if y < 100: y += 2000
+            return date(y, m_, d)
+        return s
+    if isinstance(x, (int, float, Decimal)):
+        return Decimal(str(x))
+    return x
+
+def normalize(obj):
+    if isinstance(obj, dict):
+        return {k: normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize(v) for v in obj]
+    return norm_scalar(obj)
+
+
+def count_units(obj):
+    "Compte les unités définies dans le tableau ci-dessus"
+    if isinstance(obj, dict):
+        return sum(count_units(v) for v in obj.values())
+    if isinstance(obj, list):
+        # si la liste contient uniquement des dicts ⇒ chaque dict = 1
+        if obj and all(isinstance(e, dict) for e in obj):
+            return len(obj)
+        # sinon on compte élément par élément
+        return sum(count_units(e) for e in obj)
+    return 1     # scalaire
+
+
+from deepdiff import DeepDiff
+
+def deep_diff(a, b):
+    return DeepDiff(
+        a, b,
+        ignore_order=True,
+        ignore_string_case=True,
+        report_repetition=True,
+    )
+
+
+def diff_errors(dd):
+    """Nombre d’unités erronées dans le DeepDiff"""
+    def _len(cat):          # raccourci sûr même si la clé n’existe pas
+        return len(dd.get(cat, {}))
+
+    added   = _len("dictionary_item_added") + _len("iterable_item_added")
+    removed = _len("dictionary_item_removed") + _len("iterable_item_removed")
+    changed = _len("values_changed") + _len("type_changes")
+    return added, removed, changed
+
+
+def score(ref, pred):
+    ref_n, pred_n = normalize(ref), normalize(pred)
+
+    # 1) unités de référence
+    units_ref = count_units(ref_n)
+
+    # 2) diff
+    diff = deep_diff(ref_n, pred_n)
+    added, removed, changed = diff_errors(diff)
+
+    errors = added + removed + changed
+    total  = units_ref + added        # les ajouts grossissent le dénominateur
+    ok     = total - errors
+
+    pct = 100 * ok / total if total else 100.0
+    return {
+        "ok": ok,
+        "total": total,
+        "percentage": pct,
+        "detail": {
+            "added": added,
+            "removed": removed,
+            "changed": changed
+        },
+        "deepdiff": diff             # pour inspection éventuelle
+    }
+
+
+import json
+from pathlib import Path
+
+# charge les deux fichiers (ton JSON racine est une liste → on prend [0])
+ref  = json.loads(Path("groundtruth.json").read_text())[0]
+pred = json.loads(Path("prediction.json").read_text())[0]
+
+result = score(ref, pred)
+print(f"✔️  {result['ok']} / {result['total']}  →  {result['percentage']:.2f} %")
+print("   Détail :", result['detail'])
