@@ -54,3 +54,25 @@ if not diff:
     print("✅ Aucune différence")
 else:
     print(diff.pretty())          # ou json.dumps(diff, indent=2) pour parser
+
+
+------------------------------------------------------
+
+from deepdiff import BaseOperator
+
+class CleanStrOp(BaseOperator):
+    def give_up_diffing(self, level):        # on diff toujours
+        return False
+    def hashable(self, obj):
+        if isinstance(obj, str):
+            return obj.replace(" ", "").lower()
+        return self.default_hash(obj)
+
+diff = DeepDiff(
+    gt,
+    pred,
+    ignore_order=True,
+    custom_operators=[CleanStrOp()],
+    ignore_string_case=True
+)
+
