@@ -1,0 +1,56 @@
+from pathlib import Path
+import json, re
+from decimal import Decimal
+from datetime import datetime
+from deepdiff import DeepDiff
+
+# 1) --- normalisation légère -----------------------------------------------
+date_rx = re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})")
+
+def fix_scalar(x):
+    if isinstance(x, str):
+        s = x.strip()
+        # chiffre éventuel → Decimal
+        num = s.replace(" ", "")
+        if re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", num):
+            return Decimal(num.replace(",", "."))
+        # date jj/mm/aaaa → datetime.date
+        mm = date_rx.fullmatch(num)
+        if mm:
+            d, m, y = map(int, mm.groups())
+            if y < 100: y += 2000
+            return datetime(y, m, d).date()
+        return s                       # gardé en str (casse ignorée plus tard)
+    return x
+
+def normalize(obj):
+    if isinstance(obj, dict):
+        return {k: normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize(v) for v in obj]
+    return fix_scalar(obj)
+
+# 2) --- chargement -----------------------------------------------------------
+gt   = json.loads(Path("groundtruth.json").read_text())
+pred = json.loads(Path("prediction.json").read_text())
+
+clean_gt, clean_pred = normalize(gt), normalize(pred)
+
+# 3) --- diff DeepDiff --------------------------------------------------------
+diff = DeepDiff(
+    clean_gt,
+    clean_pred,
+    ignore_order=True,
+    report_repetition=True,
+    ignore_string_case=True,      # "EUR" == "eur"
+    group_by=[
+        "numero_cheque",          # pour les listes de chèques
+        "numero_bordereau"        # pour les listes de remises
+    ],
+)
+
+# 4) --- résultat -------------------------------------------------------------
+if not diff:
+    print("✅ Aucune différence")
+else:
+    print(diff.pretty())          # ou json.dumps(diff, indent=2) pour parser
