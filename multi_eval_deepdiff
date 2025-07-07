@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Évaluation de plusieurs couples (réf, prédiction) contenus dans /json
+et export des scores dans results.csv
+"""
+from pathlib import Path
+import json, re, csv
+from decimal import Decimal
+from datetime import date, datetime
+from typing import Any, Dict
+
+# ----------------------------------------------------------------------
+# I.  Normalisation des valeurs scalaires  ------------------------------
+# ----------------------------------------------------------------------
+date_rx = re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})")
+num_rx  = re.compile(r"[+-]?\d+(?:[.,]\d+)?")
+
+def fix_scalar(x: Any) -> Any:
+    if isinstance(x, str):
+        s = x.strip()
+        # nombre ?
+        if num_rx.fullmatch(s.replace(" ", "")):
+            return Decimal(s.replace(" ", "").replace(",", "."))
+        # date ?
+        m = date_rx.fullmatch(s)
+        if m:
+            d, m_, y = map(int, m.groups())
+            if y < 100:                       # 21 → 2021
+                y += 2000
+            return date(y, m_, d)
+        return s.lower()                      # casse ignorée
+    return x
+
+def normalize(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize(v) for v in obj]
+    return fix_scalar(obj)
+
+# ----------------------------------------------------------------------
+# II. Aplatissement (chemin → valeur)  ---------------------------------
+# ----------------------------------------------------------------------
+def flatten(obj: Any, prefix: str = "") -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.update(flatten(v, f"{prefix}.{k}" if prefix else k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out.update(flatten(v, f"{prefix}[{i}]"))
+    else:
+        out[prefix] = obj
+    return out
+
+# ----------------------------------------------------------------------
+# III. Scoring pour un couple ------------------------------------------
+# ----------------------------------------------------------------------
+def score_pair(path_gt: Path, path_pred: Path) -> Dict[str, Any]:
+    gt   = json.loads(path_gt.read_text(encoding="utf-8"))
+    pred = json.loads(path_pred.read_text(encoding="utf-8"))
+
+    flat_gt   = flatten(normalize(gt))
+    flat_pred = flatten(normalize(pred))
+
+    expected_keys = set(flat_gt)
+    pred_keys     = set(flat_pred)
+    common_keys   = expected_keys & pred_keys
+
+    correct = sum(1 for k in common_keys if flat_gt[k] == flat_pred[k])
+    extra   = len(pred_keys - expected_keys)
+    score   = correct - extra
+    total   = len(expected_keys)
+
+    return {
+        "id"            : path_gt.stem.split("_")[0],  # racine du nom ; adapte si besoin
+        "total_fields"  : total,
+        "correct"       : correct,
+        "wrong_missing" : total - correct,
+        "extra_keys"    : extra,
+        "score"         : score,
+        "ratio"         : round(score / total, 4),
+    }
+
+# ----------------------------------------------------------------------
+# IV. Parcours du dossier /json  ---------------------------------------
+# ----------------------------------------------------------------------
+def discover_pairs_jsonfolder(root: Path):
+    """Renvoie une liste de tuples (gt_path, pred_path)"""
+    pairs = []
+
+    # ---------- 1) Cas « suffixe _ref / _pred » ----------
+    gt_files = list(root.glob("*_ref.json"))
+    for gt in gt_files:
+        pred = gt.with_name(gt.name.replace("_ref.json", "_pred.json"))
+        if pred.exists():
+            pairs.append((gt, pred))
+
+    # ---------- 2) Cas « sous-dossier » ----------
+    # for sub in root.iterdir():
+    #     if sub.is_dir():
+    #         gt  = sub / "groundtruth.json"
+    #         pred = sub / "prediction.json"
+    #         if gt.exists() and pred.exists():
+    #             pairs.append((gt, pred))
+
+    return pairs
+
+# ----------------------------------------------------------------------
+# V. Main ---------------------------------------------------------------
+# ----------------------------------------------------------------------
+def main(json_dir: str = "json", out_csv: str = "results.csv"):
+    root = Path(json_dir)
+    pairs = discover_pairs_jsonfolder(root)
+    if not pairs:
+        print("⚠️  Aucun couple trouvé dans", root.resolve())
+        return
+
+    rows = [score_pair(gt, pred) for gt, pred in pairs]
+
+    # Écriture CSV
+    fieldnames = ["id", "total_fields", "correct", "wrong_missing",
+                  "extra_keys", "score", "ratio"]
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"✅  {len(rows)} couples évalués. Résultats → {out_csv}")
+
+if __name__ == "__main__":
+    main()
