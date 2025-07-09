@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Évaluation de couples (réf, préd) – ordre des listes ignoré – CSV de sortie
+"""
+from pathlib import Path
+import json, re, csv
+from decimal import Decimal
+from datetime import date
+from typing import Any, Dict
+
+# ----------------------------------------------------------------------
+# I.  Normalisation -----------------------------------------------------
+# ----------------------------------------------------------------------
+date_rx = re.compile(r"(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})")
+num_rx  = re.compile(r"[+-]?\d+(?:[.,]\d+)?")
+
+def fix_scalar(x: Any) -> Any:
+    if isinstance(x, str):
+        s = x.strip()
+        if num_rx.fullmatch(s.replace(" ", "")):
+            return Decimal(s.replace(" ", "").replace(",", "."))
+        m = date_rx.fullmatch(s)
+        if m:
+            d, m_, y = map(int, m.groups())
+            if y < 100:
+                y += 2000
+            return date(y, m_, d)
+        return s.lower()
+    return x
+
+def normalize(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        # on garde l’ordre des clés déterministe pour json.dumps
+        return {k: normalize(v) for k, v in sorted(obj.items())}
+    elif isinstance(obj, list):
+        items = [normalize(v) for v in obj]
+        items.sort(key=lambda x: json.dumps(x, sort_keys=True, default=str))
+        return items
+    return fix_scalar(obj)
+
+# ----------------------------------------------------------------------
+# II. Flatten -----------------------------------------------------------
+# ----------------------------------------------------------------------
+def flatten(obj: Any, prefix: str = "") -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.update(flatten(v, f"{prefix}.{k}" if prefix else k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out.update(flatten(v, f"{prefix}[{i}]"))
+    else:
+        out[prefix] = obj
+    return out
+
+# ----------------------------------------------------------------------
+# III. Scoring ----------------------------------------------------------
+# ----------------------------------------------------------------------
+def score_pair(path_gt: Path, path_pred: Path) -> Dict[str, Any]:
+    flat_gt   = flatten(normalize(json.loads(path_gt.read_text())))
+    flat_pred = flatten(normalize(json.loads(path_pred.read_text())))
+
+    expected, predicted   = set(flat_gt), set(flat_pred)
+    common                = expected & predicted
+    correct               = sum(1 for k in common if flat_gt[k] == flat_pred[k])
+    extra                 = len(predicted - expected)
+    score                 = correct - extra
+    total                 = len(expected)
+
+    return {
+        "id"            : path_gt.stem.split("_")[0],
+        "total_fields"  : total,
+        "correct"       : correct,
+        "wrong_missing" : total - correct,
+        "extra_keys"    : extra,
+        "score"         : score,
+        "ratio"         : round(score / total, 4),
+    }
+
+# ----------------------------------------------------------------------
+# IV. Découverte des couples -------------------------------------------
+# ----------------------------------------------------------------------
+def discover_pairs(root: Path):
+    pairs = []
+    for gt in root.glob("*_ref.json"):
+        pred = gt.with_name(gt.name.replace("_ref.json", "_pred.json"))
+        if pred.exists():
+            pairs.append((gt, pred))
+    return pairs
+
+# ----------------------------------------------------------------------
+# V. Main ---------------------------------------------------------------
+# ----------------------------------------------------------------------
+def main(json_dir="json", out_csv="results.csv"):
+    root  = Path(json_dir)
+    pairs = discover_pairs(root)
+    if not pairs:
+        print("⚠️  Aucun couple trouvé dans", root.resolve())
+        return
+    rows = [score_pair(gt, pred) for gt, pred in pairs]
+
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"✅  {len(rows)} couples évalués. Résultats → {out_csv}")
+
+if __name__ == "__main__":
+    main()
