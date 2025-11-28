@@ -44,3 +44,118 @@ print(f"\nScore d'exactitude : {taux_exactitude}%")
 print("Détails des erreurs :")
 for err in erreurs:
     print(f"- {err}")
+
+-------------------
+
+import pandas as pd
+import json
+
+# --- 1. VOS FONCTIONS DE BASE ---
+
+def str_to_dict(chaine):
+    """Convertit la string brute du modèle en dictionnaire Python propre"""
+    if not isinstance(chaine, str):
+        return {}
+    
+    # Nettoyage basique (à adapter selon le comportement de votre modèle)
+    # On remplace les ' par " pour le format JSON standard
+    clean_str = chaine.replace("'", '"')
+    
+    try:
+        return json.loads(clean_str)
+    except json.JSONDecodeError:
+        # Si le modèle a "bavardé" avant/après le JSON, on peut essayer de l'extraire
+        # Ici on retourne un dico vide en cas d'échec pour ne pas casser la boucle
+        return {"error": "JSON invalide", "raw": chaine}
+
+def comparer_jsons(reference, candidat):
+    """Compare et retourne un score et les différences"""
+    score = 0
+    details_erreurs = []
+    
+    # On compare sur l'union des clés
+    toutes_les_cles = set(reference.keys()) | set(candidat.keys())
+    total_champs = len(toutes_les_cles)
+    
+    if total_champs == 0:
+        return 100.0, []
+
+    for cle in toutes_les_cles:
+        val_ref = reference.get(cle)
+        val_cand = candidat.get(cle)
+
+        if val_ref == val_cand:
+            score += 1
+        else:
+            # Gestion souple des nombres (float)
+            if isinstance(val_ref, (int, float)) and isinstance(val_cand, (int, float)):
+                if abs(val_ref - val_cand) < 0.01:
+                    score += 1
+                    continue
+            
+            details_erreurs.append(f"{cle}: attendu {val_ref} != reçu {val_cand}")
+
+    pourcentage = (score / total_champs) * 100
+    return pourcentage, details_erreurs
+
+# --- 2. PRÉPARATION DES DONNÉES ET BOUCLE ---
+
+# Simulation de votre dataset (Image + Vérité Terrain)
+dataset = [
+    {"image_path": "img1.jpg", "ref": {"id": 1, "objet": "chat", "qty": 1}},
+    {"image_path": "img2.jpg", "ref": {"id": 2, "objet": "chien", "qty": 2}},
+    {"image_path": "img3.jpg", "ref": {"id": 3, "objet": "voiture", "qty": 1}},
+]
+
+# Liste pour stocker les résultats
+resultats_liste = []
+
+print("Démarrage de l'inférence...")
+
+for i, item in enumerate(dataset):
+    print(f"Traitement de l'élément {i}...")
+    
+    reference = item['ref']
+    
+    # --- A. PARTIE MODÈLE (C'est ici que vous mettez votre code Unsloth) ---
+    # Pour l'exemple, je simule la réponse du modèle (une String)
+    # Dans votre code réel : 
+    #   outputs = model.generate(**inputs, max_new_tokens=128)
+    #   raw_response_str = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    
+    # Simulation : le modèle se trompe au 2ème passage
+    if i == 1:
+        raw_response_str = "{'id': 2, 'objet': 'loup', 'qty': 2}" # Erreur sur 'objet'
+    else:
+        # Le modèle répond correctement mais avec des guillemets simples (typiques des LLM)
+        raw_response_str = str(reference).replace('"', "'") 
+    
+    # --- B. CONVERSION ET COMPARAISON ---
+    
+    # 1. On transforme la string en dictionnaire
+    prediction_dict = str_to_dict(raw_response_str)
+    
+    # 2. On compare
+    perf, diffs = comparer_jsons(reference, prediction_dict)
+    
+    # --- C. STOCKAGE ---
+    resultats_liste.append({
+        "nom": i,              # Le numéro de la boucle
+        "perf": perf,          # Le score (0-100)
+        "diff": diffs,         # La liste des erreurs
+        "pred": prediction_dict, # Ce que le modèle a prédit (format dict)
+        "ref": reference       # La vérité terrain
+    })
+
+# --- 3. CRÉATION DU DATAFRAME ---
+
+df = pd.DataFrame(resultats_liste)
+
+# Affichage propre
+print("\n--- RÉSULTATS ---")
+print(df.head())
+
+# Exemple pour voir les détails d'une erreur
+print("\nDétail des différences pour la ligne 1 :")
+print(df.loc[1, 'diff'])
+
