@@ -1,0 +1,46 @@
+def comparer_jsons(reference, candidat):
+    score = 0
+    details_erreurs = []
+    
+    # On récupère toutes les clés uniques des deux dictionnaires
+    toutes_les_cles = set(reference.keys()) | set(candidat.keys())
+    total_champs = len(toutes_les_cles)
+    
+    if total_champs == 0:
+        return 100.0, [] # Cas où les deux sont vides
+
+    print(f"--- Comparaison sur {total_champs} champs ---")
+
+    for cle in toutes_les_cles:
+        val_ref = reference.get(cle)
+        val_cand = candidat.get(cle)
+
+        # Vérification d'égalité stricte
+        if val_ref == val_cand:
+            score += 1
+        else:
+            # Gestion spécifique pour les nombres décimaux (optionnel mais conseillé)
+            # Permet d'éviter que 150.50 soit différent de 150.5
+            if isinstance(val_ref, (int, float)) and isinstance(val_cand, (int, float)):
+                if abs(val_ref - val_cand) < 0.00001: # Tolérance minime
+                    score += 1
+                    continue
+            
+            # Si on arrive ici, c'est une erreur
+            details_erreurs.append(f"Clé '{cle}': attendu {val_ref}, reçu {val_cand}")
+
+    # Calcul du pourcentage
+    pourcentage = (score / total_champs) * 100
+    return pourcentage, details_erreurs
+
+# --- TEST ---
+
+json_ref = {'id': 1, 'montant': 150.50, 'devise': 'EUR', 'statut': 'OK'}
+json_test = {'id': 1, 'montant': 150.5, 'devise': 'USD'} # Devise fausse, statut manquant
+
+taux_exactitude, erreurs = comparer_jsons(json_ref, json_test)
+
+print(f"\nScore d'exactitude : {taux_exactitude}%")
+print("Détails des erreurs :")
+for err in erreurs:
+    print(f"- {err}")
