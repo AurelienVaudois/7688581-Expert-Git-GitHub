@@ -1,0 +1,112 @@
+import asyncio
+import time
+from openai import AsyncOpenAI
+
+# 1. Configuration du client ASYNCHRONE
+# Notez "AsyncOpenAI" au lieu de "OpenAI"
+client = AsyncOpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="token-vllm-si-necessaire", # vLLM n'exige pas de clé par défaut
+)
+
+model_name = "Qwen/Qwen2.5-32B-Instruct"
+
+# 2. La fonction qui gère UNE seule requête
+async def get_response(prompt, id):
+    print(f"Envoi de la requête {id}...")
+    try:
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=200
+        )
+        return f"Réponse {id}: {response.choices[0].message.content[:50]}..." # On affiche juste le début
+    except Exception as e:
+        return f"Erreur sur {id}: {str(e)}"
+
+# 3. Le chef d'orchestre (Main)
+async def main():
+    # Liste de prompts (simulons 10 requêtes simultanées)
+    prompts = [
+        "Explique la mécanique quantique en une phrase.",
+        "Quelle est la capitale de la France ?",
+        "Écris un poème sur les H100.",
+        "Pourquoi le ciel est bleu ?",
+        "Qui est Alan Turing ?",
+        "Recette de la tarte aux pommes.",
+        "Résume l'histoire de Rome.",
+        "C'est quoi vLLM ?",
+        "Traduis 'Hello' en espagnol.",
+        "Compte jusqu'à 10."
+    ]
+
+    print(f"Démarrage de {len(prompts)} requêtes en parallèle...")
+    start_time = time.time()
+
+    # CRUCIAL : On prépare les tâches mais on ne les attend pas encore
+    tasks = [get_response(p, i) for i, p in enumerate(prompts)]
+
+    # On lance tout en même temps et on attend que TOUT soit fini
+    results = await asyncio.gather(*tasks)
+
+    end_time = time.time()
+    
+    # Affichage des résultats
+    for res in results:
+        print(res)
+
+    print(f"\nTemps total: {end_time - start_time:.2f} secondes")
+
+# Lancement du script
+if __name__ == "__main__":
+    asyncio.run(main())
+
+----------------
+
+import asyncio
+import time
+# Assurez-vous d'avoir installé la lib : !pip install openai
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="token-vllm",
+)
+
+model_name = "Qwen/Qwen2.5-32B-Instruct"
+
+# --- On définit les fonctions normalement ---
+
+async def get_response(prompt, id):
+    # (Même code que précédemment)
+    try:
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=200
+        )
+        return f"Réponse {id}: {response.choices[0].message.content[:50]}..."
+    except Exception as e:
+        return f"Erreur sur {id}: {str(e)}"
+
+async def main():
+    prompts = ["Question 1", "Question 2", "Question 3", "Question 4"] # Ajoutez vos prompts
+    print(f"Démarrage...")
+    start_time = time.time()
+    
+    tasks = [get_response(p, i) for i, p in enumerate(prompts)]
+    results = await asyncio.gather(*tasks)
+    
+    end_time = time.time()
+    
+    for res in results:
+        print(res)
+    print(f"Temps: {end_time - start_time:.2f}s")
+
+# --- C'est ICI que ça change pour le Notebook ---
+
+# NE FAITES PAS : asyncio.run(main())
+# FAITES CECI :
+await main() 
