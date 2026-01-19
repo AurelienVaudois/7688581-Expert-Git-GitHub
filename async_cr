@@ -1,0 +1,63 @@
+import pandas as pd
+import asyncio
+from openai import AsyncOpenAI
+
+# 1. Configuration
+client = AsyncOpenAI(base_url="http://localhost:8000/v1", api_key="token-vllm")
+model_name = "Qwen/Qwen2.5-32B-Instruct"
+
+# 2. La fonction de traitement unitaire
+async def detecter_evenement(verbatim):
+    prompt_systeme = "Tu es un expert en analyse de données client. Extrais l'événement de vie principal mentionné dans ce texte (ex: Déménagement, Mariage, Décès, Naissance). Si rien n'est mentionné, réponds 'Aucun'."
+    
+    try:
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": prompt_systeme},
+                {"role": "user", "content": verbatim}
+            ],
+            temperature=0.1, # Température basse pour être plus factuel
+            max_tokens=50
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Erreur: {str(e)}"
+
+# 3. Le traitement principal
+async def main():
+    # A. Imaginons que vous chargez votre fichier (ou créez le DataFrame)
+    # df = pd.read_csv("mon_fichier_entree.csv") 
+    
+    # Pour l'exemple, je crée un faux DataFrame ici :
+    data = {
+        'id_client': [101, 102, 103],
+        'Verbatim': [
+            "Je souhaite résilier car je pars vivre à l'étranger le mois prochain.",
+            "Bonjour, je voudrais juste changer mon adresse email merci.",
+            "Suite au décès de mon conjoint, je dois mettre à jour le contrat."
+        ]
+    }
+    df = pd.DataFrame(data)
+
+    print("Traitement en cours...")
+
+    # B. Création de la liste des tâches (une par ligne du DataFrame)
+    # On itère directement sur la colonne 'Verbatim'
+    tasks = [detecter_evenement(texte) for texte in df['Verbatim']]
+
+    # C. Exécution parallèle
+    # `results` sera une liste de chaînes de caractères, dans le bon ordre
+    colonne_resultats = await asyncio.gather(*tasks)
+
+    # D. Assignation directe de la nouvelle colonne
+    df['evenement_de_vie'] = colonne_resultats
+
+    # E. Résultat final
+    print(df)
+    
+    # Sauvegarde
+    # df.to_csv("fichier_enrichi.csv", index=False)
+
+# Lancement
+await main()
