@@ -1,0 +1,24 @@
+Instructions pour Analyse Statistique :
+Analyse le compte rendu et extrait les données sous forme d'un objet JSON uniquement, sans texte avant ou après.
+Structure du JSON attendue :
+{
+"presence_kyc": {
+"foyer": true/false,
+"patrimoine": true/false,
+"projets": true/false,
+"produits_bancaires": true/false,
+"concurrence": true/false,
+"professionnel": true/false
+},
+"comptage": {
+"nb_opportunites_commerciales": integer (nombre de rebonds possibles),
+"nb_alertes_conformite": integer
+},
+"synthese_donnees": {
+"description_foyer": "string ou null",
+"liste_projets": ["liste", "de", "strings"] ou [],
+"banques_concurrentes": ["nom1", "nom2"] ou []
+},
+"score_valeur_metier": 1-5 (Note de l'intérêt du CR pour le conseiller)
+}
+Règle : Si une catégorie est absente, mets la valeur à false, 0, null ou [] selon le type, mais garde toujours la structure JSON complète.
