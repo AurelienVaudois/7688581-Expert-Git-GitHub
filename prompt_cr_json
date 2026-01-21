@@ -50,3 +50,20 @@ stats_completude = df_flags.mean() * 100
 # Score moyen de richesse vs CR manuels (si vous avez un dataset de comparaison)
 score_moyen = df['json_res'].apply(lambda x: x.get('metrics', {}).get('score_richesse_donnees', 0) if x else 0).mean()
 
+----------------
+
+### Mission ###
+Analyse le compte rendu d'entretien bancaire fourni pour identifier la valeur ajoutée selon trois axes précis.
+
+### Consignes de formatage (JSON STRICT) ###
+Réponds uniquement avec un objet JSON respectant cette structure, sans aucun texte superflu :
+
+{{
+  "opportunite_commerciale": "Indique ici le produit ou service à proposer (ex: Crédit Auto, Assurance Vie) ou 'Aucun'",
+  "mise_en_conformite": "Indique ici une donnée KYC manquante ou à mettre à jour (ex: Changement d'adresse, Profession) ou 'Aucun'",
+  "retention_fidelisation": "Indique ici un élément relationnel fort (ex: Passionné de golf, Client insatisfait des frais) ou 'Aucun'"
+}}
+
+### Compte rendu à analyser ###
+{verbatim}
+
