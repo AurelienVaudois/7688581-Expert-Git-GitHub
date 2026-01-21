@@ -30,3 +30,23 @@ Règles :
 - boolean : true si l'information est présente et exploitable, false sinon.
 - score_richesse_donnees : 1 (pauvre) à 5 (très détaillé).
 - Si aucune donnée n'est trouvée, retourne l'objet avec des valeurs false, 0 ou null.
+
+
+#####################
+
+import json
+import pandas as pd
+
+# 1. Conversion des chaînes JSON en dictionnaires
+df['json_res'] = df['evenement_de_vie'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+
+# 2. Extraction des flags de présence (pour les statistiques de complétude)
+df_flags = pd.json_normalize(df['json_res'].apply(lambda x: x.get('presence_kyc', {}) if x else {}))
+
+# 3. Calcul de la valeur ajoutée
+# Moyenne de complétude par catégorie
+stats_completude = df_flags.mean() * 100 
+
+# Score moyen de richesse vs CR manuels (si vous avez un dataset de comparaison)
+score_moyen = df['json_res'].apply(lambda x: x.get('metrics', {}).get('score_richesse_donnees', 0) if x else 0).mean()
+
