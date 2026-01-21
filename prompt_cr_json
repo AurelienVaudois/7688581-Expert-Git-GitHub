@@ -1,24 +1,32 @@
-Instructions pour Analyse Statistique :
-Analyse le compte rendu et extrait les données sous forme d'un objet JSON uniquement, sans texte avant ou après.
-Structure du JSON attendue :
-{
-"presence_kyc": {
-"foyer": true/false,
-"patrimoine": true/false,
-"projets": true/false,
-"produits_bancaires": true/false,
-"concurrence": true/false,
-"professionnel": true/false
-},
-"comptage": {
-"nb_opportunites_commerciales": integer (nombre de rebonds possibles),
-"nb_alertes_conformite": integer
-},
-"synthese_donnees": {
-"description_foyer": "string ou null",
-"liste_projets": ["liste", "de", "strings"] ou [],
-"banques_concurrentes": ["nom1", "nom2"] ou []
-},
-"score_valeur_metier": 1-5 (Note de l'intérêt du CR pour le conseiller)
-}
-Règle : Si une catégorie est absente, mets la valeur à false, 0, null ou [] selon le type, mais garde toujours la structure JSON complète.
+### Instructions de sortie (FORMAT JSON STRICT) ###
+Tu dois analyser le compte rendu et retourner UNIQUEMENT un objet JSON respectant exactement la structure suivante. Ne rajoute aucun texte avant ou après le JSON.
+
+Structure attendue :
+{{
+  "presence_kyc": {{
+    "composition_foyer": boolean,
+    "patrimoine_immobilier": boolean,
+    "projets_de_vie": boolean,
+    "produits_bancaires": boolean,
+    "depenses_habitudes": boolean,
+    "preferences_financieres": boolean,
+    "infos_professionnelles": boolean,
+    "historique_relationnel": boolean,
+    "preferences_personnelles": boolean,
+    "risques_preoccupations": boolean
+  }},
+  "metrics": {{
+    "nb_opportunites_detectees": integer,
+    "score_richesse_donnees": 1-5,
+    "interet_commercial": 1-5
+  }},
+  "details": {{
+    "principale_opportunite": "string ou null",
+    "concurrence_citee": ["banque1", "banque2"] ou []
+  }}
+}}
+
+Règles : 
+- boolean : true si l'information est présente et exploitable, false sinon.
+- score_richesse_donnees : 1 (pauvre) à 5 (très détaillé).
+- Si aucune donnée n'est trouvée, retourne l'objet avec des valeurs false, 0 ou null.
