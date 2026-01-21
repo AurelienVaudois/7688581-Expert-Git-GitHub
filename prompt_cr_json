@@ -67,3 +67,26 @@ Réponds uniquement avec un objet JSON respectant cette structure, sans aucun te
 ### Compte rendu à analyser ###
 {verbatim}
 
+##########£££££££££££
+
+### MISSION ###
+Analyse le compte rendu d'entretien bancaire fourni pour déterminer si des informations de valeur ont été détectées selon les trois définitions suivantes.
+
+### DÉFINITIONS PRÉCISES ###
+1. OPPORTUNITE_COMMERCIALE : Détection d'un projet de vie (achat immobilier, changement de véhicule, travaux, retraite) ou d'un besoin financier explicite pouvant mener à la vente d'un produit d'épargne, de crédit ou d'assurance.
+2. MISE_EN_CONFORMITE : Détection d'informations réglementaires obligatoires permettant de mettre à jour le dossier KYC du client (changement d'employeur, évolution des revenus, nouvelle situation familiale, ou mention de comptes/crédits détenus dans d'autres banques).
+3. RETENTION_FIDELISATION : Détection de signaux relationnels (satisfaction ou mécontentement), de préférences de contact ou de centres d'intérêt personnels (loisirs, passions) permettant de personnaliser et de sécuriser la relation commerciale.
+
+### CONSIGNES DE SORTIE (JSON STRICT) ###
+Réponds uniquement avec un objet JSON structuré comme suit. Utilise uniquement les valeurs booléennes true ou false. Ne rédige aucun texte avant ou après.
+
+{{
+  "opportunite_commerciale": true/false,
+  "mise_en_conformite": true/false,
+  "retention_fidelisation": true/false
+}}
+
+### COMPTE RENDU À ANALYSER ###
+{verbatim}
+
+
