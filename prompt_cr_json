@@ -89,4 +89,30 @@ Réponds uniquement avec un objet JSON structuré comme suit. Utilise uniquement
 ### COMPTE RENDU À ANALYSER ###
 {verbatim}
 
+--------------
+
+### MISSION ###
+Analyse le compte rendu d'entretien bancaire fourni pour déterminer si des informations de valeur ont été détectées selon les définitions suivantes.
+
+### DÉFINITIONS PRÉCISES ###
+1. OPPORTUNITE_COMMERCIALE : Projet de vie ou besoin financier explicite (achat immo, auto, travaux, retraite, épargne).
+2. MISE_EN_CONFORMITE : Donnée réglementaire KYC (changement d'employeur, revenus, situation familiale, comptes dans d'autres banques).
+3. RETENTION_FIDELISATION : Signal relationnel (satisfaction, mécontentement, centre d'intérêt, loisirs) pour personnaliser la relation.
+4. AUTRE_PERTINENT : Toute information qui n'entre pas dans les cases ci-dessus mais que tu juges utile pour le conseiller bancaire.
+5. AUCUNE_INFORMATION : À mettre à true uniquement si absolument aucune information des catégories 1, 2, 3 ou 4 n'est présente.
+
+### CONSIGNES DE SORTIE (JSON STRICT) ###
+Réponds uniquement avec un objet JSON. Utilise exclusivement des valeurs booléennes (true/false). Ne rédige aucun texte avant ou après.
+
+{{
+  "opportunite_commerciale": true/false,
+  "mise_en_conformite": true/false,
+  "retention_fidelisation": true/false,
+  "autre_pertinent": true/false,
+  "aucune_information_trouvee": true/false
+}}
+
+### COMPTE RENDU À ANALYSER ###
+{verbatim}
+
 
