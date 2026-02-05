@@ -77,3 +77,119 @@ def analyze_procuration(pdf_path):
 
 if __name__ == "__main__":
     analyze_procuration("exemple_procuration.pdf")
+
+--------------
+
+import os
+import io
+import base64
+import json
+from openai import OpenAI
+from pdf2image import convert_from_path
+from IPython.display import display, JSON, Image as IPImage
+
+# ---------------- CONFIGURATION ----------------
+# Remplacez par l'IP de votre instance GPU ou "localhost" si tunnel SSH
+# L'endpoint vLLM est compatible OpenAI
+API_URL = "http://localhost:8000/v1" 
+API_KEY = "EMPTY" # vLLM n'exige pas de clé par défaut
+MODEL_NAME = "Qwen/Qwen2-VL-72B-Instruct-AWQ" # Doit correspondre exactement au nom lancé sur le serveur
+
+client = OpenAI(base_url=API_URL, api_key=API_KEY)
+
+# ---------------- FONCTIONS UTILITAIRES ----------------
+
+def pdf_page_to_base64(pdf_path, page_num=0, dpi=200):
+    """
+    Convertit une page PDF en base64 pour l'envoi API.
+    Retourne aussi l'objet image pour affichage local.
+    """
+    try:
+        # Conversion PDF -> Image (RAM locale)
+        images = convert_from_path(pdf_path, dpi=dpi)
+        if page_num >= len(images):
+            raise ValueError("Numéro de page hors limites")
+        
+        pil_image = images[page_num]
+        
+        # Encodage en JPEG (plus léger que PNG pour le réseau)
+        buff = io.BytesIO()
+        pil_image.save(buff, format="JPEG", quality=95)
+        b64_string = base64.b64encode(buff.getvalue()).decode("utf-8")
+        
+        return pil_image, b64_string
+    except Exception as e:
+        print(f"Erreur conversion image: {e}")
+        return None, None
+
+def extract_data_remote(pdf_path):
+    print(f"📡 Traitement de : {pdf_path}")
+    
+    # 1. Préparation de l'image
+    img, img_b64 = pdf_page_to_base64(pdf_path)
+    if not img_b64: return
+    
+    # Affichage de contrôle dans le notebook
+    print("Document envoyé au modèle :")
+    display(img.resize((300, 400))) # Miniature
+
+    # 2. Définition du Prompt
+    system_prompt = "Tu es un expert juridique. Extrais les données au format JSON strict."
+    user_prompt = """
+    Analyse cette procuration bancaire.
+    Extrais un JSON structuré contenant :
+    - objet_procuration
+    - societe (raison_sociale, siren)
+    - mandant (nom, date_naissance)
+    - mandataire (nom, date_naissance)
+    - pouvoirs (liste détaillée avec : type, comptes_concernes, plafond, strategie_signature).
+    
+    Pour la stratégie de signature, précise si c'est SEULE ou CONJOINTE.
+    Si un SIREN est présent dans un tampon, lis-le.
+    """
+
+    # 3. Appel API vers l'instance GPU
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                        },
+                    ],
+                }
+            ],
+            temperature=0.01, # Très faible pour la stabilité du JSON
+            max_tokens=2048,
+            extra_body={"guided_json": "json_object"} # Optionnel: aide vLLM si activé
+        )
+        
+        # 4. Traitement de la réponse
+        raw_content = response.choices[0].message.content
+        
+        # Nettoyage des balises markdown éventuelles
+        clean_json = raw_content.replace("```json", "").replace("```", "").strip()
+        
+        data = json.loads(clean_json)
+        return data
+
+    except Exception as e:
+        print(f"❌ Erreur API : {e}")
+        return None
+
+# ---------------- EXECUTION ----------------
+mon_pdf = "exemple_procuration.pdf" # Assurez-vous que ce fichier est dans votre workspace local
+
+if os.path.exists(mon_pdf):
+    resultat = extract_data_remote(mon_pdf)
+    if resultat:
+        print("\n✅ Extraction réussie :")
+        display(JSON(resultat)) # Affichage interactif
+else:
+    print(f"Fichier {mon_pdf} introuvable localement.")
