@@ -1,0 +1,50 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+# --- DÉFINITION DES SOUS-OBJETS ---
+
+class Mandant(BaseModel):
+    """Celui qui DONNE le pouvoir (Jusqu'à 2)"""
+    nom: str = Field(..., description="Nom de famille")
+    prenom: str = Field(..., description="Prénom")
+    profession: Optional[str] = Field(None, description="Profession déclarée")
+    signature_presente: bool = Field(..., description="Vrai si une signature est détectée dans la zone mandant")
+
+class Mandataire(BaseModel):
+    """Celui qui REÇOIT le pouvoir (Pas de limite)"""
+    nom_naissance: Optional[str] = Field(None, description="Nom de naissance / Jeune fille")
+    nom_usage: Optional[str] = Field(None, description="Nom d'usage / Marital")
+    prenom: str = Field(..., description="Prénom")
+    date_naissance: Optional[str] = Field(None, description="Format JJ/MM/AAAA")
+    profession: Optional[str] = Field(None, description="Profession déclarée")
+    college: Optional[str] = Field(None, description="Groupe d'appartenance (ex: Collège A, B...)")
+    signature_presente: bool = Field(..., description="Vrai si une signature est détectée")
+
+class Pouvoir(BaseModel):
+    """Détail des pouvoirs bancaires"""
+    type_pouvoir: str = Field(..., description="Nom du pouvoir (ex: Virements, Consultation, Placements...)")
+    strategie_signature: str = Field(..., description="Ex: SEULE, CONJOINTE, AVEC LIMITATION")
+    comptes_concernes: str = Field(..., description="Liste des comptes ou 'TOUS' ou description textuelle")
+    plafond: Optional[float] = Field(None, description="Montant du plafond si applicable (en numérique)")
+    delegation: Optional[str] = Field(None, description="Mode de délégation ou restrictions spécifiques")
+
+# --- OBJET RACINE ---
+
+class ProcurationSchema(BaseModel):
+    """Structure complète de la procuration"""
+    objet_procuration: str = Field(..., description="Catégorie de la procuration (Générale, Spéciale, etc.)")
+    
+    # Informations Société
+    raison_sociale: str = Field(..., description="Nom de la personne morale / Entité Juridique")
+    siren: Optional[str] = Field(None, description="Numéro SIREN (9 chiffres)")
+    numero_compte_principal: Optional[str] = Field(None, description="Numéro de compte principal mentionné en tête")
+    
+    # Listes des personnes
+    mandants: List[Mandant] = Field(..., description="Liste des donneurs de pouvoirs")
+    mandataires: List[Mandataire] = Field(..., description="Liste des bénéficiaires de pouvoirs")
+    
+    # Liste des pouvoirs
+    liste_pouvoirs: List[Pouvoir] = Field(..., description="Liste détaillée des pouvoirs, plafonds et stratégies")
+
+# Génération du schéma JSON pour le prompt
+json_schema_str = ProcurationSchema.model_json_schema()
