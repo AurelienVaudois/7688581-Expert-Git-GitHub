@@ -301,3 +301,81 @@ if 'convert_from_path' in globals(): # Vérif simple si on est dans le nb
     res = analyze_full_pdf(mon_pdf)
     if res:
         display(JSON(res))
+
+------ multi pages pydantic ------
+
+import json
+from openai import OpenAI
+# Assurez-vous d'avoir défini les classes Pydantic ci-dessus avant de lancer cette fonction
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY", timeout=300)
+
+def analyze_procuration_strict(pdf_path):
+    # ... (Code de conversion PDF -> Base64 identique à l'étape précédente) ...
+    # Supposons que vous ayez récupéré `user_content` avec les images (voir réponse précédente)
+    # Pour l'exemple, je simule l'appel de conversion :
+    # user_content = prepare_images_content(pdf_path) 
+    
+    # --- CRÉATION DU PROMPT SYSTÈME DYNAMIQUE ---
+    # On injecte le schéma JSON généré par Pydantic directement dans les instructions
+    
+    system_prompt = f"""
+    Tu es un expert en analyse de documents bancaires (KYC).
+    Ta tâche est d'extraire les données de la procuration fournie en respectant STRICTEMENT le schéma JSON ci-dessous.
+    
+    DESCRIPTION DES CHAMPS :
+    1. **Objet** : Cherche le titre ou l'objet (3 catégories possibles).
+    2. **Société** : Trouve la Raison Sociale et le SIREN (souvent dans un tampon ou en-tête).
+    3. **Mandants** : Ceux qui donnent le pouvoir (Max 2).
+    4. **Mandataires** : Ceux qui reçoivent. Distingue bien Nom Naissance vs Usage si précisé.
+    5. **Pouvoirs** : Analyse le tableau des pouvoirs. 
+       - Pour "Type", essaie de catégoriser parmi les ~60 types bancaires standards.
+       - Pour "Plafond", convertis "100k" ou "100 000" en nombre float (100000.0).
+       - Pour "Signature", indique "SEULE" ou "CONJOINTE".
+    
+    SCHÉMA JSON À RESPECTER IMPÉRATIVEMENT :
+    {json.dumps(json_schema_str, indent=2)}
+    """
+
+    print("🚀 Envoi avec schéma Pydantic strict...")
+
+    try:
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2-VL-72B-Instruct-AWQ",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content} # Vos images ici
+            ],
+            temperature=0.0, # Zéro pour une rigueur maximale
+            max_tokens=4096,
+            # ASTUCE vLLM : Si votre version le supporte, ceci force le modèle à suivre le schéma
+            # Sinon, le prompt système ci-dessus suffira pour Qwen-72B
+            extra_body={
+                "guided_json": json_schema_str
+            }
+        )
+        
+        raw_json = response.choices[0].message.content
+        
+        # Nettoyage
+        clean_json = raw_json.replace("```json", "").replace("```", "").strip()
+        
+        # Validation Pydantic
+        # Si ça passe ici, c'est que l'extraction est parfaite structurellement
+        data_dict = json.loads(clean_json)
+        procuration_obj = ProcurationSchema(**data_dict)
+        
+        return procuration_obj
+
+    except Exception as e:
+        print(f"❌ Erreur : {e}")
+        return None
+
+# --- EXEMPLE D'UTILISATION ---
+# resultat = analyze_procuration_strict("mon_fichier.pdf")
+# if resultat:
+#     print(f"Société : {resultat.raison_sociale}")
+#     print(f"Premier Mandataire : {resultat.mandataires[0].nom_usage}")
+#     # Export en dict pour affichage
+#     display(JSON(resultat.model_dump()))
+
