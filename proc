@@ -193,3 +193,111 @@ if os.path.exists(mon_pdf):
         display(JSON(resultat)) # Affichage interactif
 else:
     print(f"Fichier {mon_pdf} introuvable localement.")
+
+------- MULTI PAGES --------
+
+import io
+import base64
+import json
+import time
+from openai import OpenAI
+from pdf2image import convert_from_path
+from IPython.display import display, JSON
+
+# --- CONFIGURATION ---
+API_URL = "http://localhost:8000/v1"
+API_KEY = "EMPTY"
+MODEL_NAME = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
+
+client = OpenAI(base_url=API_URL, api_key=API_KEY, timeout=300) # Timeout augmenté pour le multi-page
+
+def encode_image_optimized(pil_image):
+    """
+    Convertit et optimise une image pour l'envoi API.
+    Redimensionner réduit le nombre de tokens visuels et accélère le traitement.
+    """
+    # On redimensionne si l'image est très grande (ex: > 1500px) pour accélérer
+    # Qwen voit très bien même en 1024x1024
+    max_size = 1024
+    if max(pil_image.size) > max_size:
+        pil_image.thumbnail((max_size, max_size))
+    
+    buff = io.BytesIO()
+    # JPEG qualité 85 est le meilleur ratio poids/qualité pour l'IA
+    pil_image.convert('RGB').save(buff, format="JPEG", quality=85)
+    return base64.b64encode(buff.getvalue()).decode("utf-8")
+
+def analyze_full_pdf(pdf_path):
+    print(f"📚 Lecture complète de : {pdf_path}")
+    start_time = time.time()
+    
+    # 1. Conversion de TOUTES les pages (dpi=150 suffit et accélère x2 vs 200)
+    try:
+        pages = convert_from_path(pdf_path, dpi=150)
+        print(f"👉 Nombre de pages détectées : {len(pages)}")
+    except Exception as e:
+        print(f"❌ Erreur lecture PDF : {e}")
+        return
+
+    # 2. Construction du contenu du message
+    # On commence par l'instruction texte
+    user_content = [
+        {
+            "type": "text", 
+            "text": "Analyse ces images qui constituent les pages d'une seule et même procuration. Extrais les informations demandées au format JSON strict."
+        }
+    ]
+    
+    # On ajoute chaque page comme une image distincte
+    for i, page in enumerate(pages):
+        print(f"   - Encodage page {i+1}/{len(pages)}...")
+        b64_img = encode_image_optimized(page)
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
+        })
+
+    # 3. Prompt Système
+    system_prompt = """
+    Tu es un expert juridique. Extrais les entités du document complet.
+    Attention : Les informations (signatures, tampons) peuvent être sur la dernière page.
+    Format JSON attendu :
+    {
+      "mandant": {"nom": "string", "date_naissance": "string"},
+      "mandataire": {"nom": "string"},
+      "societe": {"raison_sociale": "string", "siren": "string"},
+      "pouvoirs": [{"type": "string", "plafond": "number", "strategie": "SEULE/CONJOINTE"}]
+    }
+    """
+
+    print("🚀 Envoi au modèle (patience, le traitement est lourd)...")
+    
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            temperature=0.1,
+            max_tokens=2048
+        )
+        
+        duration = time.time() - start_time
+        print(f"⏱️ Temps total de traitement : {duration:.1f} secondes")
+        
+        # Résultat
+        raw_content = response.choices[0].message.content
+        clean_json = raw_content.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_json)
+
+    except Exception as e:
+        print(f"❌ Erreur API : {e}")
+        return None
+
+# --- TEST ---
+mon_pdf = "exemple_procuration.pdf"
+if 'convert_from_path' in globals(): # Vérif simple si on est dans le nb
+    res = analyze_full_pdf(mon_pdf)
+    if res:
+        display(JSON(res))
