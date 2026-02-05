@@ -1,0 +1,79 @@
+import base64
+from openai import OpenAI
+from pdf2image import convert_from_path
+import io
+
+# 1. CONFIGURATION DU CLIENT
+# On pointe vers le serveur local vLLM
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="EMPTY" # vLLM ne requiert pas de clé par défaut
+)
+
+def encode_image_base64(pil_image):
+    """Convertit une image PIL en chaîne base64."""
+    buffered = io.BytesIO()
+    # JPEG est plus léger pour le transport réseau que PNG
+    pil_image.save(buffered, format="JPEG", quality=95)
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+def analyze_procuration(pdf_path):
+    print(f"--- Lecture de : {pdf_path} ---")
+    
+    # Conversion PDF -> Image (Page 1)
+    try:
+        images = convert_from_path(pdf_path, dpi=200)
+        image_base64 = encode_image_base64(images[0])
+    except Exception as e:
+        print(f"Erreur image: {e}")
+        return
+
+    # Le Prompt Système
+    system_prompt = "Tu es un expert en extraction de données bancaires. Extrais les informations au format JSON strict."
+    
+    # Le Prompt Utilisateur
+    user_prompt = """
+    Analyse cette procuration.
+    Extrais un JSON avec les champs : 
+    - mandant (nom, date_naissance)
+    - mandataire (nom)
+    - societe (siren, raison_sociale)
+    - pouvoirs (liste des pouvoirs, plafonds, conditions de signature).
+    """
+
+    print("--- Envoi de la requête au serveur vLLM ---")
+    
+    # Appel API standard OpenAI
+    response = client.chat.completions.create(
+        model="Qwen/Qwen2-VL-72B-Instruct-AWQ", # Le nom doit matcher celui lancé dans vLLM
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text", 
+                        "text": user_prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            # Format standard OpenAI Vision
+                            "url": f"data:image/jpeg;base64,{image_base64}"
+                        },
+                    },
+                ],
+            }
+        ],
+        temperature=0.1,
+        max_tokens=2048,
+        # Astuce : Pour forcer le JSON côté client si vLLM le supporte mal en VLM
+        response_format={"type": "json_object"} 
+    )
+
+    result = response.choices[0].message.content
+    print("\n--- Réponse du Modèle ---\n")
+    print(result)
+
+if __name__ == "__main__":
+    analyze_procuration("exemple_procuration.pdf")
