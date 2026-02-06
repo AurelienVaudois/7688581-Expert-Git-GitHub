@@ -1,0 +1,123 @@
+from enum import Enum
+from pydantic import BaseModel, Field
+from typing import List, Optional, Literal
+
+# Reconstitution de la hiérarchie d'après vos images (Liste non exhaustive à compléter)
+class CodePouvoir(str, Enum):
+    # --- NIV 1 : TOUT POUVOIR ---
+    TOUT_POUVOIR = "TOUT POUVOIR"
+    TOUT_POUVOIR_DELEGATION = "TOUT POUVOIR PAR DELEGATION"
+    TOUT_POUVOIR_RESTRICTION = "TOUT POUVOIR RESTRICTION COMPTE"
+    
+    # --- CONTRATS ---
+    SIGNER_RESILIER_TOUT_CONTRAT = "SIGNER/RESILIER TOUT CONTRAT"
+    SIGNER_CONVENTION_COMPTE = "SIGNER/RESILIER CONVENTION DE COMPTE"
+    SIGNER_CONTRAT_EBANKING = "SIGNER/RESILIER CONTRAT EBANKING"
+    SIGNER_CONTRAT_CASH_POOLING = "SIGNER/RESILIER CONTRAT CASH POOLING"
+    
+    # --- PAIEMENTS AU DEBIT (L'exemple le plus fréquent) ---
+    SIGNER_TOUT_PAIEMENT_DEBIT = "SIGNER TOUT PAIEMENT AU DEBIT"
+    
+    # Virements Tiers
+    SIGNER_TOUT_VIREMENT_TIERS = "SIGNER TOUT VIREMENT TIERS"
+    SIGNER_VIREMENT_DOMESTIQUE = "SIGNER VIREMENT TIERS DOMESTIQUE"
+    SIGNER_VIREMENT_SEPA = "SIGNER VIREMENT TIERS SEPA"
+    SIGNER_VIREMENT_INTERNATIONAL = "SIGNER VIREMENT TIERS INTERNATIONAL"
+    
+    # Autres débits
+    SIGNER_VIREMENT_TRESORERIE = "SIGNER TOUT VIREMENT TRESORERIE"
+    SIGNER_VIREMENT_SALAIRE = "SIGNER TOUT VIREMENT SALAIRE"
+    SIGNER_CHEQUE_EMIS = "SIGNER CHEQUE EMIS"
+    
+    # --- ENCAISSEMENT ---
+    SIGNER_TOUT_ENCAISSEMENT = "SIGNER TOUT ENCAISSEMENT"
+    ENDOSSER_EFFET_COMMERCE = "ENDOSSER/SIGNER TOUT EFFET DE COMMERCE"
+    ENDOSSER_CHEQUE = "ENDOSSER/SIGNER DEPOT CHEQUE"
+    
+    # --- FINANCEMENT / CREDIT DOC ---
+    SIGNER_AVIS_TIRAGE = "SIGNER TOUT AVIS DE TIRAGE LIE A UN FINANCEMENT"
+    SIGNER_CREDIT_DOC_IMPORT = "SIGNER TOUTE OPERATION LIEE AU TRAITEMENT DE CREDIT DOCUMENTAIRE IMPORT"
+    SIGNER_CREDIT_DOC_EXPORT = "SIGNER TOUTE OPERATION LIEE AU TRAITEMENT DE CREDIT DOCUMENTAIRE EXPORT"
+    
+    # Valeur par défaut si le modèle ne trouve pas de correspondance
+    AUTRE = "AUTRE / NON SPECIFIE"
+
+++++++ pydantic +++++++
+
+class PouvoirStandardise(BaseModel):
+    # C'est ici que la magie opère : le modèle doit choisir dans la liste
+    categorie_standard: CodePouvoir = Field(
+        ..., 
+        description="Le code standard qui correspond le mieux au pouvoir décrit dans le document."
+    )
+    texte_original: str = Field(..., description="Le texte exact tel qu'il apparaît dans le PDF (pour audit).")
+    
+    # Attributs du pouvoir
+    comptes_concernes: List[str] = Field(..., description="Liste des comptes ou 'TOUS'")
+    
+    strategie_signature: Literal["SEULE", "CONJOINTE", "NON PRECISEE"] = Field(
+        ..., description="La stratégie de signature."
+    )
+    
+    plafond_montant: Optional[float] = Field(None, description="Montant du plafond (ex: 100000.0)")
+    plafond_devise: Optional[str] = Field(None, description="Devise du plafond (ex: EUR)")
+    
+    delegation_possible: bool = Field(False, description="Le pouvoir peut-il être délégué ?")
+
+class Mandant(BaseModel):
+    nom: str
+    prenom: str
+    profession: Optional[str] = None
+    signature_presente: bool = Field(..., description="La signature du mandant est-elle visible ?")
+
+class Mandataire(BaseModel):
+    nom_usage: Optional[str] = None
+    nom_naissance: Optional[str] = None
+    prenom: str
+    date_naissance: Optional[str] = Field(None, description="Format JJ/MM/AAAA")
+    profession: Optional[str] = None
+    college: Optional[str] = Field(None, description="Groupe d'appartenance (Collège A, B...)")
+    signature_presente: bool = Field(..., description="La signature est-elle visible ?")
+
+class ProcurationStructuree(BaseModel):
+    objet_procuration: str
+    societe_raison_sociale: str
+    societe_siren: Optional[str]
+    numero_compte_principal: Optional[str]
+    
+    mandants: List[Mandant]
+    mandataires: List[Mandataire]
+    
+    # Liste des pouvoirs mappés
+    pouvoirs: List[PouvoirStandardise]
+
++++++++ prompt +++++++
+
+def get_system_prompt_mapping():
+    # On récupère la liste des choix possibles pour l'injecter dans le texte du prompt
+    liste_pouvoirs = [e.value for e in CodePouvoir]
+    
+    return f"""
+    Tu es un analyste bancaire expert.
+    
+    TA MISSION :
+    1. Extraire les entités (Mandants, Mandataires, Société).
+    2. Analyser les pouvoirs bancaires et faire un **MAPPING INTELLIGENT**.
+    
+    INSTRUCTIONS DE MAPPING DES POUVOIRS :
+    Le document contient des descriptions de pouvoirs (ex: "Peut signer des virements SEPA").
+    Tu dois associer chaque pouvoir trouvé à l'une des **Catégories Standards** ci-dessous.
+    
+    LISTE DES CATÉGORIES STANDARDS (Niveau 1, 2 et 3) :
+    {json.dumps(liste_pouvoirs, indent=2, ensure_ascii=False)}
+    
+    RÈGLES :
+    - Si le document dit "Virements SEPA", choisis "SIGNER VIREMENT TIERS SEPA".
+    - Si le document est vague ("Virements"), choisis le niveau supérieur "SIGNER TOUT VIREMENT TIERS".
+    - Si tu vois un tableau, respecte bien la ligne du compte et la colonne de la stratégie (Seule/Conjointe).
+    - Pour "Collège", cherche une mention type "Collège A" ou "Groupe 1" à côté du nom du mandataire.
+    """
+
+# Dans votre fonction d'appel API :
+# system_prompt = get_system_prompt_mapping()
+# ...
