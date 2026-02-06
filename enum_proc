@@ -121,3 +121,78 @@ def get_system_prompt_mapping():
 # Dans votre fonction d'appel API :
 # system_prompt = get_system_prompt_mapping()
 # ...
+
++++++++++ prompt ++++++
+
+import json
+from openai import OpenAI
+
+# Configuration Client (vLLM sur H100)
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY", timeout=300)
+
+def analyze_procuration_strict(pdf_path):
+    # 1. Conversion des images (Utilisez votre fonction existante qui marche)
+    # user_content = prepare_images_content(pdf_path) 
+    # Pour l'exemple, supposons que vous avez déjà `user_content`
+    # (Si besoin je vous remets le code de conversion, mais vous sembliez l'avoir)
+    
+    # 2. Génération du Schéma JSON pour le guidage
+    # Cela transforme nos classes Python en un schéma que l'IA comprend
+    json_schema = ProcurationSchema.model_json_schema()
+    
+    # 3. Récupération de la liste des choix pour le prompt texte
+    # On aide le modèle en lui listant les choix possibles en texte clair aussi
+    liste_choix = [e.value for e in CodePouvoir]
+
+    # 4. Prompt Système "Augmenté"
+    system_prompt = f"""
+    Tu es un expert bancaire. Analyse cette procuration.
+    
+    MISSION DE MAPPING :
+    Le document contient des descriptions de pouvoirs (ex: "Peut signer des chèques").
+    Tu dois obligatoirement classer chaque pouvoir dans l'une des catégories standards ci-dessous.
+    
+    LISTE DES CATÉGORIES AUTORISÉES :
+    {json.dumps(liste_choix, indent=2, ensure_ascii=False)}
+    
+    RÈGLES D'EXTRACTION :
+    - **Collège** : Si un mandataire appartient au "Collège A" ou "Groupe B", extrais-le.
+    - **Stratégie** : "SEULE" ou "CONJOINTE" (avec qui ?).
+    - **Mapping** : Si le texte dit "Virement SEPA", choisis "SIGNER VIREMENT TIERS SEPA".
+      Si le texte est vague ("Virements"), prends le niveau supérieur "SIGNER TOUT VIREMENT TIERS".
+    """
+
+    print("🚀 Envoi au modèle Qwen sur H100 avec Mapping Strict...")
+
+    try:
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2-VL-72B-Instruct-AWQ", # Votre ID modèle exact
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content} # Vos images base64
+            ],
+            temperature=0.01, # Très faible pour éviter qu'il invente des catégories
+            max_tokens=4096,
+            # C'est la clé : on force la structure de sortie
+            extra_body={
+                "guided_json": json_schema
+            }
+        )
+
+        # 5. Parsing et Validation
+        raw_json = response.choices[0].message.content
+        clean_json = raw_json.replace("```json", "").replace("```", "").strip()
+        
+        # Validation Pydantic automatique
+        # Si une catégorie est inventée par le modèle, cette ligne plantera (c'est ce qu'on veut)
+        data_struct = ProcurationSchema.model_validate_json(clean_json)
+        
+        return data_struct
+
+    except Exception as e:
+        print(f"❌ Erreur : {e}")
+        # En cas d'erreur Pydantic, on peut vouloir voir le JSON brut pour comprendre
+        if 'raw_json' in locals():
+            print("--- JSON Brut reçu (Invalide) ---")
+            print(raw_json)
+        return None
