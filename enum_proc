@@ -196,3 +196,56 @@ def analyze_procuration_strict(pdf_path):
             print("--- JSON Brut reçu (Invalide) ---")
             print(raw_json)
         return None
+
+++++++ stream ++++++
+
+def analyze_procuration_streaming(pdf_path):
+    # (Assurez-vous d'avoir user_content, json_schema, et liste_choix définis comme avant)
+    # ... code de préparation (identique au précédent) ...
+    
+    print("🚀 Envoi au modèle en mode STREAMING (Anti-Timeout)...")
+
+    try:
+        # On lance la requête
+        stream = client.chat.completions.create(
+            model="Qwen/Qwen2-VL-72B-Instruct-AWQ",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            temperature=0.01,
+            max_tokens=4096,
+            stream=True,  # IMPORTANT
+            extra_body={"guided_json": json_schema}
+        )
+        
+        # --- CORRECTION DE LA BOUCLE ---
+        full_response = ""
+        print("Réception : ", end="")
+        
+        # On boucle sur l'itérateur 'stream'
+        for chunk in stream:
+            # Vérification de sécurité : le chunk a-t-il des choix ?
+            if chunk.choices:
+                # En streaming, le contenu est dans .delta.content, pas .message.content
+                delta_content = chunk.choices[0].delta.content
+                
+                if delta_content:
+                    full_response += delta_content
+                    # Feedback visuel minimaliste
+                    print(".", end="", flush=True)
+
+        print("\n✅ Terminé !")
+        
+        # Parsing final du JSON reconstitué
+        clean_json = full_response.replace("```json", "").replace("```", "").strip()
+        
+        # Validation Pydantic
+        return ProcurationSchema.model_validate_json(clean_json)
+
+    except Exception as e:
+        print(f"\n❌ Erreur : {e}")
+        if 'full_response' in locals() and len(full_response) > 0:
+            print(f"Début de réponse reçue avant plantage : {full_response[:200]}...")
+        return None
+
