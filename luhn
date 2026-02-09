@@ -1,0 +1,36 @@
+from pydantic import BaseModel, Field, field_validator
+
+class ProcurationSchema(BaseModel):
+    # ... autres champs ...
+    
+    societe_siren: Optional[str] = Field(None, description="Le SIREN (9 chiffres)")
+
+    @field_validator('societe_siren')
+    @classmethod
+    def valider_siren_luhn(cls, v):
+        if not v:
+            return v
+            
+        # 1. Nettoyage : On enlève les espaces éventuels (ex: "302 456 789")
+        clean_siren = v.replace(" ", "").replace(".", "")
+        
+        # 2. Vérification format de base
+        if not clean_siren.isdigit() or len(clean_siren) != 9:
+            raise ValueError(f"Format SIREN invalide (doit être 9 chiffres) : {v}")
+
+        # 3. Algorithme de LUHN (La preuve mathématique)
+        # On inverse le nombre, on double un chiffre sur deux...
+        digits = [int(d) for d in clean_siren]
+        checksum = 0
+        # Parcours de droite à gauche, un chiffre sur deux est doublé
+        for i, digit in enumerate(reversed(digits)):
+            if i % 2 == 1: # Positions impaires (en partant de 0 à droite)
+                doubled = digit * 2
+                checksum += doubled if doubled < 10 else (doubled - 9)
+            else:
+                checksum += digit
+                
+        if checksum % 10 != 0:
+            raise ValueError(f"SIREN mathématiquement faux (Hallucination ou erreur OCR) : {v}")
+            
+        return clean_siren
