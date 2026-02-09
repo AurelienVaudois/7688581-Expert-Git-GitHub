@@ -62,3 +62,16 @@ def generer_prompt_mapping(glossaire_dict):
     prompt_text += "### FIN DES RÈGLES ###\n"
     return prompt_text
 
++++++++++ enum +++++++
+
+from enum import Enum
+
+# Création dynamique de l'Enum basée sur les clés de vos fichiers JSON
+# Cela garantit que Pydantic acceptera tout ce qui est défini dans vos fichiers
+ListeCodes = Enum('CodePouvoir', {k: k for k in mon_glossaire.keys()})
+
+# Utilisation dans le modèle Pydantic
+class PouvoirStandardise(BaseModel):
+    categorie_standard: ListeCodes = Field(...) # Utilise l'Enum dynamique
+    # ...
+
