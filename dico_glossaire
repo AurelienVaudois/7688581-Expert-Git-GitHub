@@ -39,3 +39,26 @@ def charger_glossaire_depuis_dossier(chemin_dossier):
 # Remplacez par le chemin de votre dossier contenant les JSONs
 # DOSSIER_GLOSSAIRE = "/mnt/data/PROCURATION_LIBRE/GLOSSAIRE"
 # glossaire = charger_glossaire_depuis_dossier(DOSSIER_GLOSSAIRE)
+
+
+++++++++++++
+
+def generer_prompt_mapping(glossaire_dict):
+    """
+    Transforme le dictionnaire en texte d'instruction pour le System Prompt.
+    """
+    prompt_text = "\n### 🧠 RÈGLES DE MAPPING SÉMANTIQUE (GLOSSAIRE MÉTIER) ###\n"
+    prompt_text += "Tu ne dois pas deviner. Tu dois utiliser ce dictionnaire pour traduire le texte du PDF en CODE STANDARD.\n\n"
+    
+    for code, phrases in glossaire_dict.items():
+        # On formatte pour que ce soit lisible par l'IA
+        # On limite à 50 synonymes par code pour éviter de saturer le context inutilement
+        top_phrases = phrases[:50] 
+        liste_txt = ", ".join([f'"{p}"' for p in top_phrases])
+        
+        prompt_text += f"🔵 Si tu lis : {liste_txt}\n"
+        prompt_text += f"   👉 Alors le pouvoir est : {code}\n\n"
+        
+    prompt_text += "### FIN DES RÈGLES ###\n"
+    return prompt_text
+
