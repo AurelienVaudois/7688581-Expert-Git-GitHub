@@ -1,0 +1,41 @@
+import os
+import json
+import glob
+
+def charger_glossaire_depuis_dossier(chemin_dossier):
+    """
+    Lit tous les fichiers .json dans le dossier et fusionne les règles.
+    Retourne un dictionnaire : { "CODE_POUVOIR": ["phrase 1", "phrase 2"] }
+    """
+    glossaire_global = {}
+    
+    # On cherche tous les fichiers .json
+    fichiers = glob.glob(os.path.join(chemin_dossier, "*.json"))
+    print(f"📂 Chargement de {len(fichiers)} fichiers de définition...")
+
+    for fichier in fichiers:
+        try:
+            with open(fichier, 'r', encoding='utf-8') as f:
+                content = json.load(f)
+                
+                # Le contenu est supposé être : {"CODE": ["liste", "phrases"]}
+                for code_pouvoir, phrases_associees in content.items():
+                    # On nettoie les phrases (strip) pour être propre
+                    clean_phrases = [p.strip() for p in phrases_associees if isinstance(p, str)]
+                    
+                    if code_pouvoir in glossaire_global:
+                        # Si le code existe déjà (ex: réparti sur 2 fichiers), on étend la liste
+                        glossaire_global[code_pouvoir].extend(clean_phrases)
+                    else:
+                        glossaire_global[code_pouvoir] = clean_phrases
+                        
+        except Exception as e:
+            print(f"⚠️ Erreur lecture fichier {os.path.basename(fichier)} : {e}")
+
+    print(f"✅ Glossaire chargé : {len(glossaire_global)} codes pouvoirs identifiés.")
+    return glossaire_global
+
+# --- TEST ---
+# Remplacez par le chemin de votre dossier contenant les JSONs
+# DOSSIER_GLOSSAIRE = "/mnt/data/PROCURATION_LIBRE/GLOSSAIRE"
+# glossaire = charger_glossaire_depuis_dossier(DOSSIER_GLOSSAIRE)
