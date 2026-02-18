@@ -83,3 +83,44 @@ print(df_ppt.to_string(index=False))
 # Optionnel : Export vers Excel pour un import direct dans PowerPoint
 # df_ppt.to_excel("stats_presentation_pptx.xlsx", index=False)
 
+++++++++++++++
+
+import pandas as pd
+
+# 1. Configuration des thématiques détectées
+columns_to_check = [
+    "Composition familiale", "Intention de souscription", "Risque attrition", 
+    "Potentiel de rapatriement", "Projets Immobiliers & Auto", 
+    "Projets Consommation & Loisirs", "Autres"
+]
+
+results = []
+total_cr = len(df_final)
+
+for col in columns_to_check:
+    # Nombre de CR où l'intention est détectée
+    nb_mention = df_final[col].sum()
+    part_cr = (nb_mention / total_cr) * 100
+    
+    # Détection des CR ne parlant QUE de ce sujet
+    other_cols = [c for c in columns_to_check if c != col]
+    is_unique = (df_final[col] == True) & (df_final[other_cols].sum(axis=1) == 0)
+    nb_unique = is_unique.sum()
+    
+    # Calcul de la spécificité (si on parle de ce sujet, est-ce le seul ?)
+    taux_unicite = (nb_unique / nb_mention * 100) if nb_mention > 0 else 0
+    
+    results.append({
+        "Thématique détectée": col,
+        "Nombre de CR": int(nb_mention),
+        "% des CR totaux": round(part_cr, 1),
+        "Mention Unique (Sujet seul)": int(nb_unique),
+        "Taux d'Exclusivité (%)": round(taux_unicite, 1)
+    })
+
+# Création du tableau pour PowerPoint
+df_ppt = pd.DataFrame(results)
+
+print(f"Analyse basée sur un total de {total_cr} comptes-rendus :")
+print(df_ppt.to_string(index=False))
+
