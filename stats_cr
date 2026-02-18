@@ -36,3 +36,50 @@ df_exclusive = pd.Series(exclusive_counts, name="Nombre de True Exclusifs").to_f
 
 print("\n--- Modalité True Exclusive (uniquement cette colonne à True) ---")
 print(df_exclusive)
+
++++++++++
+
+import pandas as pd
+
+# 1. Configuration des colonnes
+columns_to_check = [
+    "Composition familiale", "Intention de souscription", "Risque attrition", 
+    "Potentiel de rapatriement", "Projets Immobiliers & Auto", 
+    "Projets Consommation & Loisirs", "Autres"
+]
+
+# 2. Initialisation de la liste pour stocker les résultats
+results = []
+total_rows = len(df_final)
+
+for col in columns_to_check:
+    # Calculs de base
+    total_true = df_final[col].sum()
+    penetration = (total_true / total_rows) * 100
+    
+    # Calcul de l'exclusivité (True ici et False ailleurs)
+    other_cols = [c for c in columns_to_check if c != col]
+    is_exclusive = (df_final[col] == True) & (df_final[other_cols].sum(axis=1) == 0)
+    exclusive_volume = is_exclusive.sum()
+    
+    # Calcul du taux d'exclusivité (par rapport aux porteurs du besoin)
+    exclusivity_rate = (exclusive_volume / total_true * 100) if total_true > 0 else 0
+    
+    # Ajout à la liste
+    results.append({
+        "Catégorie de Donnée": col,
+        "Volume Total (True)": int(total_true),
+        "Pénétration (%)": round(penetration, 1),
+        "Volume Exclusif": int(exclusive_volume),
+        "Taux d'Exclusivité (%)": round(exclusivity_rate, 1)
+    })
+
+# 3. Création du DataFrame final
+df_ppt = pd.DataFrame(results)
+
+# 4. Affichage du tableau pour copier-coller
+print(df_ppt.to_string(index=False))
+
+# Optionnel : Export vers Excel pour un import direct dans PowerPoint
+# df_ppt.to_excel("stats_presentation_pptx.xlsx", index=False)
+
