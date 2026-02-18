@@ -124,3 +124,46 @@ df_ppt = pd.DataFrame(results)
 print(f"Analyse basée sur un total de {total_cr} comptes-rendus :")
 print(df_ppt.to_string(index=False))
 
+++++±++++++++
+
+import pandas as pd
+
+# 1. Liste des colonnes (Thématiques)
+columns_to_check = [
+    "Composition familiale", "Intention de souscription", "Risque attrition", 
+    "Potentiel de rapatriement", "Projets Immobiliers & Auto", 
+    "Projets Consommation & Loisirs", "Autres"
+]
+
+results = []
+total_cr = len(df_final)
+
+for col in columns_to_check:
+    # Fréquence de détection (Nombre de fois où True apparaît)
+    nb_mention = df_final[col].sum()
+    
+    # Part des CR (%) (Fréquence / Total des CR)
+    part_cr = (nb_mention / total_cr) * 100
+    
+    # Mention Unique (Sujet seul : True ici et False sur toutes les autres thématiques)
+    other_cols = [c for c in columns_to_check if c != col]
+    is_unique = (df_final[col] == True) & (df_final[other_cols].sum(axis=1) == 0)
+    nb_unique = is_unique.sum()
+    
+    # On construit le dictionnaire avec les noms exacts du tableau PowerPoint
+    results.append({
+        "Thématique (Intention)": col,
+        "Fréquence de détection": int(nb_mention),
+        "Part des CR (%)": round(part_cr, 1),
+        "Mention Unique": int(nb_unique)
+    })
+
+# 2. Création du DataFrame final
+df_presentation = pd.DataFrame(results)
+
+# 3. Affichage propre
+print(f"Analyse effectuée sur un volume de {total_cr} CR.")
+print("-" * 60)
+print(df_presentation.to_string(index=False))
+
+
