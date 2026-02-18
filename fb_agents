@@ -1,0 +1,28 @@
+C’est une excellente session d'acculturation et d'alignement stratégique. Elle réussit parfaitement à poser le cadre "Groupe" et à donner une vision macro de la trajectoire technologique.
+✅ Les points forts (à conserver/approfondir)
+Le contexte Entreprise : La présentation explique bien pourquoi le Groupe veut se positionner et comment on passe du simple Chatbot au RAG, puis au workflow, pour arriver aux pipelines agentiques.
+La gestion des risques et Gouvernance : C’est la partie la plus solide. Les concepts de "Govern before deploy", de "Human by the loop" et l'importance de l'accountability (un owner par agent) sont cruciaux pour nous.
+Le Monitoring & Audit : Très bonne emphase sur l'explicabilité, la traçabilité (lineage data/modèle) et l'approche FinOps.
+L’approche par le besoin : Piloter par le business et définir précisément ce que l’agent peut (ou ne peut pas) faire est une excellente guideline.
+⚠️ Les manques / Limites (pour les Data Scientists)
+Absence de technique "Hands-on" : La session reste très conceptuelle. Il n'y a aucune explication de code, pas de détails sur les frameworks d'orchestration (type LangGraph, CrewAI) ou sur la manipulation réelle des outils par l'agent.
+Pas de montée en compétence "Hard Skills" : En l'état, ce n'est pas une formation qui permet à un Data Scientist de construire un agent. C'est un contenu pour comprendre l'écosystème, pas pour implémenter.
+💡 Mes préconisations pour le prestataire
+Garder le socle "Gouvernance & Risques" : C'est très pertinent pour le contexte bancaire.
+Scinder les parcours : Garder ce contenu tel quel pour les PO/Managers (Acculturation), mais prévoir un deep-dive technique pour les DS/Devs.
+Ajouter du concret pour les profils Tech : Pour nous, il faudrait une partie sur l'industrialisation (comment on sort du POC ?), l'évaluation technique des agents et des exemples de code sur l'implémentation des boucles de raisonnement.
+
+ Debrief Flash : Session Agents IA
+L'essentiel : Une excellente session d'acculturation stratégique, mais pas encore une formation technique "métier" pour les Data Scientists.
+✅ Ce qu'il faut retenir (Les points forts) :
+Alignement Groupe : Très bonne explication de la trajectoire (Chatbot \rightarrow RAG \rightarrow Workflow \rightarrow Agent) et de l'ambition d'hyper-automatisation.
+Cadre de Gouvernance : Les principes "Govern before deploy" et l'insistance sur l'accountability (un owner par agent) sont parfaits pour notre contexte bancaire.
+Maîtrise des Risques : Approche claire sur le "Human by the loop" (contrôle humain selon le niveau de risque) et l'interdiction des tests en production.
+Operational Excellence : Focus pertinent sur le monitoring, le lineage (data/modèle) et l'approche FinOps pour piloter les coûts.
+⚠️ Ce qu'il manque (Pour les profils Tech/DS) :
+Zéro technique : Aucune ligne de code, ni détail sur l'implémentation des frameworks (type LangGraph ou CrewAI).
+Trop macro : On explique "ce qu'est" un agent, mais pas "comment on le build" concrètement dans nos environnements.
+Évaluation technique : Il manque une brique sur comment tester et valider techniquement la fiabilité d'un agent.
+💡 Ma recommandation pour la suite :
+Scinder les publics : Garder ce format pour les PO/Managers (Acculturation).
+Créer un module "Deep Dive DS" : Ajouter des ateliers pratiques avec du code, de l'orchestration et des méthodes d'évaluation technique.
