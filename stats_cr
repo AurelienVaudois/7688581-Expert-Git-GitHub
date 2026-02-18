@@ -1,0 +1,38 @@
+import pandas as pd
+
+# 1. Définition des colonnes
+columns_to_check = [
+    "Composition familiale", "Intention de souscription", "Risque attrition", 
+    "Potentiel de rapatriement", "Projets Immobiliers & Auto", 
+    "Projets Consommation & Loisirs", "Autres"
+]
+
+# 2. Statistiques descriptives complètes
+# On calcule le nombre de True, le nombre de False et le pourcentage de True
+stats_desc = pd.DataFrame({
+    'Nombre de True': df_final[columns_to_check].sum(),
+    'Nombre de False': len(df_final) - df_final[columns_to_check].sum(),
+    'Pourcentage de True (%)': (df_final[columns_to_check].mean() * 100).round(2)
+})
+
+print("--- Statistiques Descriptives ---")
+print(stats_desc)
+
+# 3. Calcul de la modalité True "Exclusive"
+# Pour chaque colonne, on compte les lignes où elle est True ET la somme des autres colonnes est 0
+exclusive_counts = {}
+
+for col in columns_to_check:
+    # Autres colonnes dans la liste
+    other_cols = [c for c in columns_to_check if c != col]
+    
+    # Condition : la colonne actuelle est True ET toutes les autres sont False
+    is_exclusive = (df_final[col] == True) & (df_final[other_cols].sum(axis=1) == 0)
+    
+    exclusive_counts[col] = is_exclusive.sum()
+
+# Conversion en DataFrame pour une lecture facile
+df_exclusive = pd.Series(exclusive_counts, name="Nombre de True Exclusifs").to_frame()
+
+print("\n--- Modalité True Exclusive (uniquement cette colonne à True) ---")
+print(df_exclusive)
