@@ -1,5 +1,11 @@
 # 🏛️ Hephaestus Assistant: Secure On-Premises AI Coding Agent
 
+<div align="center">
+  <img src="chemin/vers/votre/image_hephaestus.png" alt="Hephaestus Assistant" width="800">
+</div>
+
+<br>
+
 > *"Just as the mythological god of the forge crafted tools for the gods, Hephaestus Assistant is a secure, air-gapped AI coding agent deployed on our local H100 GPU. It acts as a powerful pair-programmer for our Data Science team, accelerating the creation of complex NLP and data extraction pipelines, while ensuring 100% of our banking data and intellectual property remains strictly on-premises."*
 
 ---
