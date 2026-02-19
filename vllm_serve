@@ -1,0 +1,6 @@
+vllm serve /domino/datasets/nom_de_votre_dataset/Qwen3-Coder-Next-AWQ-4bit \
+  --served-model-name qwen-agent \
+  --gpu-memory-utilization 0.95 \
+  --max-model-len 32768 \
+  --port 8000 \
+  --trust-remote-code
