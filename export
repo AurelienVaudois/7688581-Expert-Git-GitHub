@@ -1,1 +1,5 @@
 export TRITON_PTXAS_PATH=$(python -c "import nvidia.cuda_nvcc; import os; print(os.path.join(os.path.dirname(nvidia.cuda_nvcc.__file__), 'bin', 'ptxas'))")
+
++++++++
+
+export TRITON_PTXAS_PATH=$(python -c "import importlib.util, os; print(os.path.join(importlib.util.find_spec('nvidia.cuda_nvcc').submodule_search_locations[0], 'bin', 'ptxas'))")
