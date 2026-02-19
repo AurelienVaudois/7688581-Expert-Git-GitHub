@@ -1,0 +1,62 @@
+# 🏛️ Hephaestus Assistant: Secure On-Premises AI Coding Agent
+
+> *"Just as the mythological god of the forge crafted tools for the gods, Hephaestus Assistant is a secure, air-gapped AI coding agent deployed on our local H100 GPU. It acts as a powerful pair-programmer for our Data Science team, accelerating the creation of complex NLP and data extraction pipelines, while ensuring 100% of our banking data and intellectual property remains strictly on-premises."*
+
+---
+
+## 📋 Executive Summary
+
+**Hephaestus Assistant** is an initiative to deploy a generative AI infrastructure dedicated to coding, operating in a **strictly air-gapped environment** within Domino Data Lab.
+
+This project addresses two critical business needs:
+* **Absolute Banking Security:** Providing Copilot/ChatGPT-level capabilities without exposing a single line of code, client data, or query to the public internet.
+* **Data Science Productivity:** Drastically accelerating the development of unstructured data processing pipelines (NLP, Speech-to-Text, OCR) with an autonomous agent capable of understanding complex contexts, debugging, and refactoring Python/SQL code.
+
+---
+
+## 🏗️ Target Architecture
+
+To guarantee performance without compromising security or user experience, we utilize a decoupled hardware architecture hosted within Domino:
+
+| Component | Role | Allocated Hardware | Local Quantized AI Model |
+| :--- | :--- | :--- | :--- |
+| **The "Brain" (Agent)** | Complex reasoning, Chat, Pipeline creation, Autonomous debugging. | **Primary GPU (NVIDIA H100 80GB)** | `cyankiwi/Kimi-Dev-72B-AWQ-4bit` |
+| **The "Reflex" (Autocomplete)** | Instant code completion (Tab) with ultra-low latency (<300ms). | **Secondary GPU (e.g., L4 24GB)** | `Qwen2.5-Coder-7B-Base` |
+| **Inference Engine** | High-performance, OpenAI-compatible API server. | N/A | **vLLM** (x2 instances) |
+| **User Interface** | Data Scientists' IDE. | Local Workstations | **VS Code** + Continue & Roo Code |
+
+**Why this architecture?**
+* **Security (Safetensors):** The selected models are audited and use the `.safetensors` format, guaranteeing that no malicious code can be executed during weight loading (no `trust_remote_code` required).
+* **Workload Isolation:** Using two distinct GPUs ensures that the heavy reasoning tasks of the Agent do not bottleneck the instant autocomplete features for the rest of the team.
+* **VRAM Optimization:** The **4-bit AWQ** quantization format fits a massive 72-billion parameter model onto the H100 while preserving **~40GB of working memory (KV Cache)** to analyze large client documents and NLP scripts.
+
+---
+
+## 🚀 Quick Start Guide
+
+To connect your VS Code to Hephaestus Assistant in Domino:
+
+1.  **Prerequisites:** Install the **Continue** extension (for fast chat and autocomplete) and **Roo Code / Cline** (for autonomous agent tasks) from the internal VS Code marketplace.
+2.  **Configuration:** Open the `config.json` file in the Continue extension and use the following configuration to point to our local vLLM servers:
+
+```json
+{
+  "models": [
+    {
+      "title": "🏛️ Hephaestus Agent (H100)",
+      "provider": "openai",
+      "model": "kimi-dev-72b-awq",
+      "apiBase": "http://<INTERNAL_DOMINO_URL>:8000/v1",
+      "apiKey": "EMPTY",
+      "contextLength": 32000
+    }
+  ],
+  "tabAutocompleteModel": {
+    "title": "⚡ Hephaestus Autocomplete (Secondary GPU)",
+    "provider": "openai",
+    "model": "qwen2.5-coder-7b-base",
+    "apiBase": "http://<INTERNAL_DOMINO_URL>:8001/v1",
+    "apiKey": "EMPTY"
+  },
+  "allowAnonymousTelemetry": false
+}
